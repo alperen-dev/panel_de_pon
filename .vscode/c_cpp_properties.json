@@ -10,7 +10,7 @@
                 "UNICODE",
                 "_UNICODE"
             ],
-            "compilerPath": "C:\\Users\\Alperen\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.MSVCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\gcc.exe",
+            "compilerPath": "gcc.exe",
             "cStandard": "gnu89",
             "cppStandard": "gnu++17",
             "intelliSenseMode": "windows-gcc-x64"
