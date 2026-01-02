@@ -113,8 +113,22 @@ void print_matrix(char matrix[][MAX_GAME_MATRIX_SIZE], int n, int m) /* genel bi
 /* mantık olarak powershell'deki pause komutuna benzer bir fonksiyon, enter tuşuna basana kadar bekler */
 void pause() 
 {
-	printf("Devam etmek için bir Enter (Return) tuşuna basın . . .\n");
+	printf("Devam etmek için Enter (Return) tuşuna basın . . .\n");
 	clear_stdin(); /* bu fonksyion zaten getchar'ı çağırdığı için bir daha getchar çağırmamıza gerek yok */
+}
+
+/* Oyunun o anki durumunu yazan fonksiyon, bu fonksiyonun kullanılma sebebi oyun döngüsünde birden fazla yerde */
+/* oyun matrisini ve puanları yazdırmamızın gerekmesi. parametre olarak verilen değerlere ve moda göre ekranda */
+/* yazılacak metinleri ayarlar. */
+void print_status(char matrix[][MAX_GAME_MATRIX_SIZE], int n, int m, int game_mode, int movement_count, int explosion_count)
+{
+	if(game_mode == GAME_MODE_NORMAL) /* eğer oyun modu ise ekranı temizle */
+	{
+		clear_screen();
+	}
+	/* durumu ekrana yaz */
+	printf("\nToplam yer değişikliği: %d\nToplam patlatılan element: %d\n", movement_count, explosion_count);
+	print_matrix(matrix, n, m);
 }
 
 int main()
@@ -123,75 +137,80 @@ int main()
 	char game_matrix[MAX_GAME_MATRIX_SIZE][MAX_GAME_MATRIX_SIZE], ch = 0;
 	const char game_characters[GAME_CHARACTERS_LENGTH] = {'*', '/', '+', '%', 'O'};
 	
+	srand(time(NULL)); /* rastgele sayı üretmek için zamanı kullandık. basit bir oyun için yeterli bir "rastgelelik" sağlar */
+	
 	print_splash_screen();
 	
 	/* Kullanıcıdan matris boyutunun alınması ve kontrol edilmesi, geçersizse gerekli mesajların yazılması */
-	is_valid = 0;
 	do
 	{
+		is_valid = 1; /* Girdinin en başta doğru olduğu varsayılır */
 		printf("Oyun alanının boyutlarını (N M) giriniz [%d-%d]: ", MIN_GAME_MATRIX_SIZE, MAX_GAME_MATRIX_SIZE);
 		temp = scanf("%d %d", &n, &m);
 		clear_stdin();
 		if(temp != 2)
 		{
-			printf("Geçersiz girdi!\n");
+			printf("Geçersiz girdi, bu girdi için 2 tane [%d-%d] arası tamsayı girmelisiniz!\n", MIN_GAME_MATRIX_SIZE, MAX_GAME_MATRIX_SIZE);
+			is_valid = 0;
+		}
+		else /* girdi sayısı doğru bu yüzden n ve m'nin değerlerini kontrol edebiliriz */
+		{
+			if(n < MIN_GAME_MATRIX_SIZE || n > MAX_GAME_MATRIX_SIZE)
+			{
+				printf("N=%d değeri geçersiz aralıktadır!\n", n);
+				is_valid = 0;
+			}
+			if(m < MIN_GAME_MATRIX_SIZE || m > MAX_GAME_MATRIX_SIZE)
+			{
+				printf("M=%d değeri geçersiz aralıktadır!\n", m);
+				is_valid = 0;
+			}
+		}
+		
+		if(is_valid == 0) /* girdi hatalıysa kullanıcıyı bekle */
+		{
 			pause();
 		}
-		else if(n < MIN_GAME_MATRIX_SIZE || n > MAX_GAME_MATRIX_SIZE)
-		{
-			printf("N=%d değeri geçersiz aralıktadır!\n", n);
-			pause();
-		}
-		else if(m < MIN_GAME_MATRIX_SIZE || m > MAX_GAME_MATRIX_SIZE)
-		{
-			printf("M=%d değeri geçersiz aralıktadır!\n", m);
-			pause();
-		}
-		else
-		{
-			is_valid = 1;
-		}
+		
 	}while(is_valid == 0);
 	/* Kullanıcıdan matrisin boyunu alma işlemi bitti */
 	
 	
 	/* Kullanıcıdan oyun modunun alınması ve kontrol edilmesi, gerekirse hata mesajlarının yazılması */
-	is_valid = 0;
 	do
 	{
+		is_valid = 1;
 		printf("Oyun modu için %d, kontrol modu için %d giriniz: ", GAME_MODE_NORMAL, GAME_MODE_CONTROL);
 		temp = scanf("%d", &game_mode);
 		clear_stdin();
 		if(temp != 1)
 		{
-			printf("Geçersiz girdi!\n");
+			printf("Geçersiz girdi, bu girdi için %d veya %d tamsayı değerlerini girmelisiniz!\n", GAME_MODE_NORMAL, GAME_MODE_CONTROL);
+			is_valid = 0;
 			pause();
 		}
 		else if(game_mode != GAME_MODE_NORMAL && game_mode != GAME_MODE_CONTROL)
 		{
-			printf("Geçersiz mod!\n");
+			printf("Geçersiz mod, geçerli modlar: %d ve %d\n", GAME_MODE_NORMAL, GAME_MODE_CONTROL);
+			is_valid = 0;
 			pause();
-		}
-		else
-		{
-			is_valid = 1;
 		}
 	}while(is_valid == 0);
 	/* Kullanıcıdan oyun modunu alma bitti */
 	
 	
-	/* oyun modu ve kontol modu için game_matrix'e uygun değerlerin yerleştirilmesi */
-	for(i = 0; i < n/2; i++) /* Eğer program birden fazla kez dönecek ise eski değerleri silmek için bu döngüye ihtiyaç var */
+	/* game_matrix'in boş kalması gereken kısımlarına '\0' değeri atanır */
+	for(i = 0; i < n-n/2; i++) /* Eğer program birden fazla kez dönecek ise eski değerleri silmek için de bu döngüye ihtiyaç var */
 	{
 		for(j = 0; j < m; j++)
 		{
 			game_matrix[i][j] = '\0';
 		}
 	}
+	
 	/* Modlara göre matrisi oluştur veya iste */
 	if(game_mode == GAME_MODE_NORMAL)
 	{
-		srand(time(NULL)); /* rastgele sayı üretmek için zamanı kullandık. basit bir oyun için yeterli bir "rastgelelik" sağlar */
 		for(i = n-n/2; i < n; i++) /* n-n/2 dedik eğer direkt n/2 deseydik "üstten n/2 boş bırak" demiş olurduk, bu da tek sayıda satır varsa bir satır daha fazla dolu olmasına sebep olurdu." */
 		{
 			for(j = 0; j < m; j++)
@@ -203,30 +222,28 @@ int main()
 	else /* game_mode == GAME_MODE_CONTROL, ancak kontrol etmeye gerek yok */
 	{
 		printf( "Kontrol modunu seçtiniz %d-%d satırlarının başlangıç durumlarını girmeniz gerekmektedir.\n"
-				" Girebileceğiniz karakterler: [%.*s]\n", n-(n/2)+1, n, GAME_CHARACTERS_LENGTH, game_characters);
+				"Girebileceğiniz karakterler: [%.*s]\n", n-(n/2)+1, n, GAME_CHARACTERS_LENGTH, game_characters);
 		for(i = n-n/2; i < n; i++) /* n-n/2 dedik eğer direkt n/2 deseydik "üstten n/2 boş bırak" demiş olurduk, bu da tek sayıda satır varsa bir satır daha fazla dolu olmasına sebep olurdu." */
 		{
 			for(j = 0; j < m; j++)
 			{				
 				/* Girdi kontrolü yapılıp eğer doğru karakter girildi ise atama yapılır, hatalı girdi ise hata mesajı verilir. */
-				is_valid = 0;
 				do
 				{
+					is_valid = 1;
 					printf("%d. satır, %d. sütun karakterini giriniz: ", i+1, j+1);
-					scanf("%c", &ch);
+					scanf(" %c", &ch); /* %c değerinde bulunan boşluk kullanıcının hatalı girdi yapmasını önleyebilir. (girilen karakterden önceki white spaceleri atlayarak) */
 					clear_stdin();
 					k = 0;
-					while((k < GAME_CHARACTERS_LENGTH) && (ch != game_characters[k]))
+					while((k < GAME_CHARACTERS_LENGTH) && (ch != game_characters[k])) /* girilen karakterin oyun karakteri olup olmadığına karar veren döngü */
 					{
 						k++;
 					}
-					if(k < GAME_CHARACTERS_LENGTH) /* Geçerli girdi */
+					if(k >= GAME_CHARACTERS_LENGTH) /* Geçersiz girdi */
 					{
-						is_valid = 1;
-					}
-					else /* Geçersiz girdi */
-					{
-						printf("\'%c\' karakteri geçerli bir oyun karakteri değil!\n", ch);
+						printf( "\'%c\' karakteri geçerli bir oyun karakteri değil!\n"
+								"Geçerli oyun karakterleri şunlardır: [%.*s]\n", ch, GAME_CHARACTERS_LENGTH, game_characters);
+						is_valid = 0;
 						pause();
 					}				
 				}while(is_valid == 0);
@@ -240,18 +257,12 @@ int main()
 	/* Oynun asıl döngüsü */
 	do
 	{
-		if(game_mode == GAME_MODE_NORMAL) /* eğer oyun modu ise ekranı temizle */
-		{
-			clear_screen();
-		}
-		/* durumu ekrana yaz */
-		printf("Toplam yer değişikliği: %d\nToplam patlatılan element: %d\n", movement_count, explosion_count);
-		print_matrix(game_matrix, n, m);
+		print_status(game_matrix, n, m, game_mode, movement_count, explosion_count);
 		
 		/* Kullanıcıdan yapılacak işlemin alınması ve kontrol edilmesi, gekerirse hata mesajlarının yazılması */
-		is_valid = 0;
 		do
 		{
+			is_valid = 1;
 			printf( "Yer değişikliği için %d\n"
 					"Patlama için %d\n"
 					"Oyundan çıkmak için %d giriniz: ", GAME_OPERATION_MOVE, GAME_OPERATION_EXPLODE, GAME_OPERATION_EXIT);
@@ -259,17 +270,18 @@ int main()
 			clear_stdin();
 			if(temp != 1)
 			{
-				printf("Geçersiz girdi!\n");
-				pause();
+				printf("Geçersiz girdi, bu girdi için %d, %d veya %d tamsayı değerlerini girmelisiniz!\n", GAME_OPERATION_MOVE, GAME_OPERATION_EXPLODE, GAME_OPERATION_EXIT);
+				is_valid = 0;
 			}
 			else if(operation != GAME_OPERATION_MOVE && operation != GAME_OPERATION_EXPLODE && operation != GAME_OPERATION_EXIT)
 			{
-				printf("Geçersiz işlem!\n");
-				pause();
+				printf("Geçersiz işlem, geçerli işlemler: {%d, %d, %d}\n", GAME_OPERATION_MOVE, GAME_OPERATION_EXPLODE, GAME_OPERATION_EXIT);
+				is_valid = 0;
 			}
-			else
+			
+			if(is_valid == 0)
 			{
-				is_valid = 1;
+				pause();
 			}
 		}while(is_valid == 0);
 		/* Kullanıcıdan yapılacak işlemi alma bitti */
@@ -282,17 +294,19 @@ int main()
 		else if(operation == GAME_OPERATION_MOVE) /* İki karakterin yerini değiştirmek istediğinde */
 		{
 			int row1 = 0, col1 = 0, row2 = 0, col2 = 0;
+			int operation_cancelled = 0;
 			/* Yerleri değişecek iki koordinat kullanıcıdan alınır */
 			do
 			{
 				is_valid = 1; /* girdinin en başta doğru olduğu varsayıldı */
-				printf("Yerlerini değiştirmek istediğiniz iki koordinatı giriniz (fotmat: r1,c1 r2,c2): ");
-				temp = scanf("%d,%d%d,%d", &row1, &col1, &row2, &col2);
+				printf("Yerlerini değiştirmek istediğiniz iki koordinatı giriniz (format: r1,c1 r2,c2): ");
+				temp = scanf("%d , %d %d , %d", &row1, &col1, &row2, &col2);
 				clear_stdin();
 				if(temp != 4)
 				{
-					is_valid = 0;
-					printf("Geçersiz girdi!\n");
+					operation_cancelled = 1;
+					printf("Yer değiştirme işlemi iptal edildi\n");
+					pause();
 				}
 				else
 				{
@@ -318,67 +332,84 @@ int main()
 						is_valid = 0;
 						printf("c2=%d değeri geçersiz aralıktadır!\n", col2);
 					}
+					if(is_valid == 1) /* koordinatlar geçerli aralıkta, şimdi koordinatların yer değiştirip değiştiremeyeceğini kontrol et */
+					{
+						if(game_matrix[row1-1][col1-1] == '\0')
+						{
+							is_valid = 0;
+							printf("Girdiğiniz 1. koordinatlarda (%d,%d) herhangi bir karakter bulunmamaktadır!\n", row1, col1);
+						}
+						if(game_matrix[row2-1][col2-1] == '\0')
+						{
+							is_valid = 0;
+							printf("Girdiğiniz 2. koordinatlarda (%d,%d) herhangi bir karakter bulunmamaktadır!\n", row2, col2);
+						}
+						if(row1 != row2 || ABS(col1-col2) != 1) // koordinatlar yan yana, sadece yan yana koordinatlar yer değiştirebilir
+						{
+							is_valid = 0;
+							printf("(%d,%d) koordinatları ile (%d,%d) koordinatları yan yana değil!\n", row1, col1, row2, col2);
+						}
+						/*else if(ABS(row1-row2)+ABS(col1-col2) != 1) // koordinatlar yan yana veya alt alta değil, sadece yan yana veya alt alta koordinatlar yer değiştirebilir
+						{
+							is_valid = 0;
+							printf("(%d,%d) koordinatları ile (%d,%d) koordinatları yan yana veya alt alta değil!\n", row1, col1, row2, col2);
+						}*/
+					}
 				}
-				if(is_valid == 0) /* hata oldu, kullanıcıya bilgi ver */
+				if(is_valid == 0) /* hata oldu, kullanıcıya bilgi verildi, bekle */
 				{
 					pause();
+					print_status(game_matrix, n, m, game_mode, movement_count, explosion_count);
 				}
 			}while(is_valid == 0);
-			row1--, col1--, row2--, col2--;
 			/* koordinatlar başarı ile alındı */
-			
-			
-			/* Şimdi bu koordinatlar yer değiştirilebilir mi onu kontrol etmeliyiz */
-			if(game_matrix[row1][col1] == '\0')
+					
+			if(operation_cancelled == 0) /* Geçerli koordinatlar, yer değiştirme işlemini yap */
 			{
-				printf("Girdiğiniz 1. koordinatlarda (%d,%d) herhangi bir karakter bulunmamaktadır!\n", row1+1, col1+1);
-				pause();
-			}
-			else if(game_matrix[row2][col2] == '\0')
-			{
-				printf("Girdiğiniz 2. koordinatlarda (%d,%d) herhangi bir karakter bulunmamaktadır!\n", row2+1, col2+1);
-				pause();
-			}
-			else if(ABS(row1-row2)+ABS(col1-col2) != 1) /* koordinatlar yan yana değil, sadece yan yana koordinatlar yer değiştirebilir */
-			{
-				printf("(%d,%d) koordinatları ile (%d,%d) koordinatları yan yana değil!\n", row1+1, col1+1, row2+1, col2+1);
-				pause();
-			}
-			else /* Geçerli koordinatlar, yer değiştirme işlemini yap */
-			{
+				row1--, col1--, row2--, col2--;
+				
 				ch = game_matrix[row1][col1];
 				game_matrix[row1][col1] = game_matrix[row2][col2];
 				game_matrix[row2][col2] = ch;
 				
 				movement_count++;
+				
+				/* Burada yer değiştirme işlemi yapıldıktan sonra, ama aşağı yeni satır eklemeden önce bizden matrisi yazdırmamız istendiği için */
+				print_status(game_matrix, n, m, game_mode, movement_count, explosion_count);
+				printf("Yer değiştirildi. Yeni satır ekleniyor\n");
+				pause();
+				
+				
+				
 				for(j = 0; j < m; j++) /* matrisin en altına yeni satırı ekleme döngüsü, her sütuna tek tek eklenir */
 				{
 					/* matrisin en alt satırından üst satırlara doğru kaydırma işlemi yapılır. */
 					/* en üstten başlamak daha az değişken kullanmamızı sağlardı ancak bu sefer önce boş olmayan satırı bulmamız gerekirdi (veya boş yere işlem gücü harcardık boş satırları kaydırarak) */
 					temp = game_matrix[n-1][j];
 					i = n-2;
-					while((i >= 0) && (temp != '\0')) /* TODO: i >= 0 kontrolüne gerek olup olmadığını kontrol et */
+					while(temp != '\0') /* TODO: i >= 0 kontrolüne gerek olup olmadığını kontrol et */
 					{
 						int old_val = game_matrix[i][j];
 						game_matrix[i][j] = temp;
 						temp = old_val;
 						i--;
 					}
+					/* sütundaki her satır bir üste kaydırıldı, şimdi rastgele yeni bir karakteri en alta yaz */
+					game_matrix[n-1][j] = game_characters[rand() % GAME_CHARACTERS_LENGTH];
+					/* en üst satırı kontrol et, eğer bir taş varsa ended = 1 */
+					if(game_matrix[0][j] != '\0')
+					{
+						ended = 1; /* yani kaybettin */
+					}
 				}
 				/* kaydırma işlemi bitti */
-				/* sadece en üst satırı kontrol ederek oynun bitip bitmediğine karar verebiliriz */
 				/* proje ön bilgisinde "Oyun tüm alan doluncaya" kadar denmiş ancak örnekte üst satırda birkaç tane sütun dolduğunda */
-				/* oyun sonlandırılmış. Ben de bana daha mantıklı gelen üst satırda herhangi dolu bir kutu varsa oyun bitsin */
-				/* şeklinde yapacağım */
-				j = 0;
-				while((j < m) && (game_matrix[0][j] == '\0')) /* üst satırda boş karakter yoksa döngüyü erken bitirir */
+				/* oyun sonlandırılmış. Ben de bana daha mantıklı gelen üst satırda herhangi dolu bir kutu varsa oyun bitsin şeklinde yaptım*/
+				if(ended == 1) /* en üst satırda 0 olmayan eleman var */
 				{
-					j++;
-				}
-				if(j < m) /* en üst satırda 0 olmayan eleman var */
-				{
+					print_status(game_matrix, n, m, game_mode, movement_count, explosion_count);
 					printf("Oyun en üst satırda eleman bulunduğu için sonlandırılmıştır.");
-					ended = 1; /* yani kaybettin */
+					
 				}
 			}
 		}
@@ -386,18 +417,20 @@ int main()
 		else /* operation == GAME_OPERATION_EXPLODE, ancak başka bir şey olamayacağı için direkt else dedik */
 		{
 			int row, col;
+			int operation_cancelled = 0;
 			
 			/* Patlatılacak koordinat kullanıcıdan alınır */
-			is_valid = 1; /* girdinin en başta doğru olduğu varsayıldı */
 			do
 			{
+				is_valid = 1; /* girdinin en başta doğru olduğu varsayıldı */
 				printf("Patlatmak istediğiniz bloğun sol veya üst koordinatını giriniz (format: r,c): ");
-				temp = scanf("%d,%d", &row, &col);
+				temp = scanf("%d , %d", &row, &col);
 				clear_stdin();
 				if(temp != 2)
 				{
-					is_valid = 0;
-					printf("Geçersiz girdi!\n");
+					operation_cancelled = 1;
+					printf("Patlatma işlemi iptal edildi\n");
+					pause();
 				}
 				else
 				{
@@ -411,27 +444,31 @@ int main()
 						is_valid = 0;
 						printf("c=%d değeri geçersiz aralıktadır!\n", col);
 					}
+					/* önce is_valid kontrol ettik ki eğer sınır dışında ise rastgele bellek adresine erişmeye çalışmasın */
+					if(is_valid == 1 && game_matrix[row-1][col-1] == '\0') /* boş kutu patlatılamaz */
+					{
+						is_valid = 0;
+						printf("Girdiğiniz koordinatta (%d,%d) herhangi bir karakter bulunmamaktadır!\n", row, col);
+					}
 				}
 				if(is_valid == 0) /* hata oldu, kullanıcıya bilgi ver */
 				{
 					pause();
+					print_status(game_matrix, n, m, game_mode, movement_count, explosion_count);
 				}
 			}while(is_valid == 0);
-			row--, col--;
-			/* koordinat başarı ile alındı */
 			
-			/* Şimdi bu koordinatta patlama olabilir mi onu kontrol etmeliyiz */
-			/* proje kapsamında patlatmak için elemanın sol üst köşe olduğu belirtildiği için */
-			/* sadece sağa ve aşağı doğru kontrol etmek yeterlidir. */
-			if(game_matrix[row][col] == '\0')
+			/* eğer operasyon iptal edilmediyse (karakter girmek gibi) işleme devam edebiliriz*/
+			/* operation_cancelled == 1 ise patlatma işlemi iptal edilmiş demektir */
+			if(operation_cancelled == 0) /* iptal edilmedi */
 			{
-				printf("Girdiğiniz koordinatta (%d,%d) herhangi bir karakter bulunmamaktadır!\n", row+1, col+1);
-				pause();
-			}
-			else
-			{
+				/* girdi başarıyla alındı */
+				row--, col--;
+				/* Şimdi bu koordinatta patlama olabilir mi onu kontrol etmeliyiz */
+				/* proje kapsamında patlatmak için elemanın sol üst köşe olduğu belirtildiği için */
+				/* sadece sağa ve aşağı doğru kontrol etmek yeterlidir. */
 				int right_length = 1, down_length = 1; /* hangisi daha fazlaysa o kullanılacak, 1'den başlattık çünkü kendisi de arıyor */
-				ch = game_matrix[row][col]; /* aradığımız elemanı kısaltmak için */
+				ch = game_matrix[row][col]; /* aradığımız elemanı kısaltmak için (önbellek optimizasyonu) */
 				
 				/* mesafelerin tespit edilmesi */
 				for(j = col+1; j < m && ch == game_matrix[row][j]; j++) /* sağa doğru */
@@ -446,7 +483,7 @@ int main()
 				/* Herhangi bir patlama olamadığı durum için */
 				if((down_length < 3) && (right_length < 3))
 				{
-					printf("Herhangi bir patlama olamadı!\n ");
+					printf("Herhangi bir patlama olamadı!\n");
 					pause();
 				}
 				/* mesafesi fazla olan ve 3'den büyük eşit olan yöne doğru patlatma işlemini yap */
@@ -454,27 +491,32 @@ int main()
 				{
 					for(j = 0; j < right_length; j++) /* daha önceden bulunan uzuluk kadar sütunun üstünü 1 aşağı aldık */
 					{
-						for(i = row-1; i >= 0 && game_matrix[i][col+j] != '\0'; i--)
+						for(i = row-1; i >= 0 && game_matrix[i][col+j] != '\0'; i--) /* sütunun dolu olduğu elemanları birer birer aşağı ötele */
 						{
 							game_matrix[i+1][col+j] = game_matrix[i][col+j]; /* satırı birer birer aşağı kaydır */
 						}
 						game_matrix[i+1][col+j] = '\0'; /* aşağı düşmeden önce en üstte bulunan satır artık bir aşağıda, bunu 0 yapmalıyız. */
-						explosion_count += right_length; /* patlama gerçekleşti */
 					}
+					explosion_count += right_length; /* patlama gerçekleşti */
 				}
 				else /* Burada bir şeyi kontrol etmemize gerek yok zaten ilk iki if'in olmama durumunda aşağı uzunluk sağ uzunluktan büyük ve aşağı uzunluk yeterli bir uzunluğu sahip */
 				{
-					for(i = row-1; i >= 0 && game_matrix[i][col] != '\0'; i--) /* daha önceden bulunan uzunluk (down_length) kadar aşağı doğru satıları kaydıracağız */
+					/* bu dögüde k indisi patlama olan bölgenin üstündeki elemanları, i indisi patlama olan bölgeleri temsil eder */
+					k = row-1;
+					for(i = row-1+down_length; game_matrix[k][col] != '\0'; i--, k--)
 					{
-						game_matrix[i+down_length][col] = game_matrix[i][col]; /* üstteki satırı down_length kadar aşağı al */
-						game_matrix[i][col] = '\0'; /* bu satır artık aşağıda, buradan silebiliriz */
+						game_matrix[i][col] = game_matrix[k][col]; /* üstteki satırı down_length kadar aşağı al */
+					}
+					while(i < k) /* aşağı düşen satırları '\0' değeri atadık */
+					{
+						game_matrix[i][col] = '\0';
+						i--;
 					}
 					explosion_count += down_length; /* patlama gerçekleşti */
 				}
 				/* kaydırma işlemi bitti */
 				/* ödevin herhangi bir yerinde "kazanmak" diye bir şey geçmediği için bu kadar */
 				/* eğer tüm elemanlar bitince kazanmak olsaydı onu da son satırı kontrol ederek yapabilirdik. */
-				
 			}
 		}
 	}while(ended == 0);

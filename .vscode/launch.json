@@ -8,8 +8,8 @@
 		"name": "(gdb) Launch",
 		"type": "cppdbg",
 		"request": "launch",
-		"program": "${workspaceFolder}/{${fileBasenameNoExtension}}.exe",
-		"args": [],
+		"program": "${workspaceFolder}/${fileBasenameNoExtension}.exe",
+		"args": ["set charset UTF-8"],
 		"stopAtEntry": false,
 		"cwd": "${fileDirname}",
 		"environment": [],
@@ -26,6 +26,9 @@
 				"description": "Set Disassembly Flavor to Intel",
 				"text": "-gdb-set disassembly-flavor intel",
 				"ignoreFailures": true
+			},
+			{
+				"text": "set charset UTF-8"
 			}
 		]
 	}
