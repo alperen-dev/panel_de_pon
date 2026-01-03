@@ -11,9 +11,15 @@
                 "_UNICODE"
             ],
             "compilerPath": "gcc.exe",
-            "cStandard": "gnu89",
+            "cStandard": "c89",
             "cppStandard": "gnu++17",
-            "intelliSenseMode": "windows-gcc-x64"
+            "intelliSenseMode": "windows-gcc-x64",
+            "compilerArgs": [
+                "-m32",
+                "-Wall",
+                "-Wextra",
+                "-Wpedantic"
+            ]
         }
     ],
     "version": 4
