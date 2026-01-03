@@ -23,7 +23,7 @@
 void print_splash_screen()
 {
 	puts(
-			"Panel De Pon oynuna hoş geldiniz!\n"
+			"Panel De Pon oyununa hoş geldiniz!\n"
 			"Bu oynun amacı karakterler en üst satıra değmeden en fazla sayıda element patlatmaya çalışmaktır\n"
 			"Oyun karakterleri: [*/+%O]\n"
 			"\n"
@@ -35,6 +35,7 @@ void print_splash_screen()
 			" 5- Eğer hem dikey hem yatay patlama olabiliyorsa oyun en fazla element patlayabilecek olanı seçecektir\n"
 			" 6- Eğer dikey ve yatay patlayabilecek element sayısı eşitse oyun yatay olanı seçer\n"
 			" 7- Bir element grubunu patlatmaya karar verdiğinizde bu grubun en üst veya en sol elementinin koordinatını girmeniz gerekmektedir\n"
+			" 8- Yer değiştirme veya patlama işlemi seçildikten sonra koordinat yerine rakam olmayan bir karakter girmek işlemi iptal etmeyi sağlar\n"
 			"\n"
 			"Oyun Modları: \n"
 			" 1- Normal Mod:\n"
@@ -387,7 +388,7 @@ int main()
 					/* en üstten başlamak daha az değişken kullanmamızı sağlardı ancak bu sefer önce boş olmayan satırı bulmamız gerekirdi (veya boş yere işlem gücü harcardık boş satırları kaydırarak) */
 					temp = game_matrix[n-1][j];
 					i = n-2;
-					while(temp != '\0') /* TODO: i >= 0 kontrolüne gerek olup olmadığını kontrol et */
+					while(i >= 0 && temp != '\0') /* temp != '\0' kontrolü ile gereksiz kaydırma işlemlerinden kaçınmış olduk */
 					{
 						int old_val = game_matrix[i][j];
 						game_matrix[i][j] = temp;
@@ -503,11 +504,11 @@ int main()
 				{
 					/* bu dögüde k indisi patlama olan bölgenin üstündeki elemanları, i indisi patlama olan bölgeleri temsil eder */
 					k = row-1;
-					for(i = row-1+down_length; game_matrix[k][col] != '\0'; i--, k--)
+					for(i = row-1+down_length; k >= 0 && game_matrix[k][col] != '\0'; i--, k--) /* TODO: k >= 0 gerekli değil */
 					{
 						game_matrix[i][col] = game_matrix[k][col]; /* üstteki satırı down_length kadar aşağı al */
 					}
-					while(i < k) /* aşağı düşen satırları '\0' değeri atadık */
+					while(i > k) /* aşağı düşen satırları '\0' değeri atadık */
 					{
 						game_matrix[i][col] = '\0';
 						i--;
@@ -515,8 +516,6 @@ int main()
 					explosion_count += down_length; /* patlama gerçekleşti */
 				}
 				/* kaydırma işlemi bitti */
-				/* ödevin herhangi bir yerinde "kazanmak" diye bir şey geçmediği için bu kadar */
-				/* eğer tüm elemanlar bitince kazanmak olsaydı onu da son satırı kontrol ederek yapabilirdik. */
 			}
 		}
 	}while(ended == 0);
