@@ -1,12 +1,14 @@
 #include <stdio.h> /* printf scanf getchar */
 #include <stdlib.h> /* rastgele sayı üretmek için */
 #include <time.h> /* rastgele sayı üretirken seed'i zamana göre seçebilmek için */
+#include <assert.h> /* parametre olarak gönderilen pointerlerin NULL olup olmadığını kontrol ederken kullanılan assert makrosu */
+/* assert makrosu içindeki mantıksal ifade 0 ise hata verip programı kapatır */
 
 #define MAX_GAME_MATRIX_SIZE 20
 #define MIN_GAME_MATRIX_SIZE 3 /* 3x3'den az olduğunda herhangi bir patlama yapılamayacağı için 3 olarak belirledim, aslında dikey patlama için 4 yatay patlama için 3 olması gerekir yani (4x3) matris, şu anki haliyle sadece yatay patlama yapılabilir */
 
-#define MAX_GAME_MATRIX_POSITON 20
-#define MIN_GAME_MATRIX_POSITON 1
+#define MAX_GAME_MATRIX_POSITION 20
+#define MIN_GAME_MATRIX_POSITION 1
 
 #define GAME_CHARACTERS_LENGTH 5 /* oyundaki toplam karakter çeşiti sayısı */
 
@@ -36,22 +38,35 @@ typedef enum GameOperation
 	GAME_OPERATION_EXPLODE = 2
 }GameOperation;
 
-typedef struct MatrixSize
+/* Oyun matrisini ve matrisin boyutunu içinde tutan yapı */
+typedef struct GameBoard
 {
+	GameMatrix matrix;
 	int n, m; /* n->row, m->column */
-}MatrixSize;
+	/* n ve m değişkenleri başta MatrixSize isimli başka bir struct içinde tutulmuştu */
+	/* ancak bu elemanlara erişim için kullanılacak kod çok uzadığı için (mesela gameBoard->matrixSize.n gibi) silindi */
+}GameBoard;
 
+/* Oyun tahtasındaki bir noktayı gösteren koordinatı temsil eden yapı */
 typedef struct Coord
 {
 	int i, j; /* i->row, j->column */
 }Coord;
 
+typedef struct MatrixSize
+{
+	int n, m; /* n->row, m->column */
+}MatrixSize;
+/* Not: modern c standartlarında isimsiz birlik (union) kullanıp MatrixSize ve Coord yapılarını tek bir yapı olarak tanımlayabilirdik */
+
+/* Hareket hamlesi için gerekli olan iki koordinatı saklayan yapı */
 typedef struct MovementCoords
 {
 	Coord c1;
 	Coord c2;
 }MovementCoords;
 
+/* Oyun durumunu tek paket içinde tutmamızı sağlayan yapı */
 typedef struct GameStatus
 {
 	int gameMode, movementCount, explosionCount;
@@ -60,7 +75,7 @@ typedef struct GameStatus
 /* Oyun ilk açıldığında ekrana yazılacak yazıları barındıran fonksiyon */
 void print_splash_screen()
 {
-	/* stringleri parçalara ayırdık çünkü bu kadar uzun bir string c89 (anci c) tarafından desteklenmez (null hariç en fazla 509 karakter) */
+	/* stringleri parçalara ayırdık çünkü bu kadar uzun bir string c89 (ansi c) tarafından desteklenmez (null hariç en fazla 509 karakter) */
 	puts(
 			"Panel De Pon oyununa hoş geldiniz!\n"
 			"Bu oynun amacı karakterler en üst satıra değmeden en fazla sayıda element patlatmaya çalışmaktır\n"
@@ -123,38 +138,40 @@ void clear_screen()
 /* tablo yaparken |-+ karakterleri yerine direkt tablo karakterleri kullanılabilirdi ancak kodun taşınabilirliği azalırdı */
 /* Çünkü modern sistemlerde kullanılan UNICODE'e göre tablo karakterleri ile eski tip (ANSI) tablo karakterlerinin karakter kodları farklı */
 /* bu da UNICODE kullanan terminaller ile ANSI kullanan terminaller arasında taşınabilirliği azaltırdı */
-void print_matrix(GameMatrix gameMatrix, MatrixSize matrixSize) /* genel bir fonksiyon değil, iyi bir görünüm için en fazla 20 sütun destekler */
+void print_matrix(const GameBoard *gameBoard) /* genel bir fonksiyon değil, iyi bir görünüm için en fazla 20 sütun destekler */
 {
 	int i = 0, j = 0;
 	
+	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
+	
 	/* sütunun onlar basamağı yazılır */
-	printf("\n  |%-.*s|\n  ", matrixSize.m*2-1, "0                 1                   2"); /* sütun sayısında göre 3. parametredeki string'in belli bir kısmı yazılır */
+	printf("\n  |%-.*s|\n  ", gameBoard->m*2-1, "0                 1                   2"); /* sütun sayısında göre 3. parametredeki string'in belli bir kısmı yazılır */
 	/* sütun numarasının onlar basamağı yazıldı */
 	
 	/* sütun numarasının birler basamağı yazılır */
-	for(j = 0; j < matrixSize.m; j++)
+	for(j = 0; j < gameBoard->m; j++)
 	{
 		printf("|%d", (j+1)%10);
 	}
 	printf("|\n");
 	/* sütun numarasının birler basamağı yazıldı */
 	
-	for(j = 0; j < matrixSize.m*2+3; j++) /* satırların en üstüne tire işaretleri konulur */
+	for(j = 0; j < gameBoard->m*2+3; j++) /* satırların en üstüne tire işaretleri konulur */
 	{
 		printf("-");
 	}
 	printf("\n");
 	
 	
-	for(i = 0; i < matrixSize.n; i++)
+	for(i = 0; i < gameBoard->n; i++)
 	{
 		printf("%02d", i+1); /* her satırın başında satır numarası yaz */
-		for(j = 0; j < matrixSize.m; j++)
+		for(j = 0; j < gameBoard->m; j++)
 		{
-			printf("|%c", (gameMatrix[i][j] == '\0') ? ' ' : gameMatrix[i][j]); /* tablo karakterini ve oyun karakterini yaz */
+			printf("|%c", (gameBoard->matrix[i][j] == '\0') ? ' ' : gameBoard->matrix[i][j]); /* tablo karakterini ve oyun karakterini yaz */
 		}
 		printf("|\n"); /* tablo karakterinin en sonuncusunu koy */
-		for(j = 0; j < matrixSize.m*2+3; j++) /* yazılan satırın altına tire işaterlerini koy */
+		for(j = 0; j < gameBoard->m*2+3; j++) /* yazılan satırın altına tire işaterlerini koy */
 		{
 			printf("-");
 		}
@@ -173,27 +190,31 @@ void pause()
 /* Oyunun o anki durumunu yazan fonksiyon, bu fonksiyonun kullanılma sebebi oyun döngüsünde birden fazla yerde */
 /* oyun matrisini ve puanları yazdırmamızın gerekmesi. parametre olarak verilen değerlere ve moda göre ekranda */
 /* yazılacak metinleri ayarlar. */
-void print_status(GameMatrix gameMatrix, MatrixSize matrixSize, GameStatus gameStatus)
+void print_status(const GameBoard *gameBoard, GameStatus gameStatus)
 {
+	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
+	
 	if(gameStatus.gameMode == GAME_MODE_NORMAL) /* eğer oyun modu ise ekranı temizle */
 	{
 		clear_screen();
 	}
 	/* durumu ekrana yaz */
 	printf("\nToplam yer değişikliği: %d\nToplam patlatılan element: %d\n", gameStatus.movementCount, gameStatus.explosionCount);
-	print_matrix(gameMatrix, matrixSize);
+	print_matrix(gameBoard);
 }
 
 /* 1. parametredeki matrisin tüm değerlerini 2. parametredeki adresde bulunan MatrixSize yapısına göre '\0' yapar */
-/* 2. parametrenin pointer olmasının sebebi tek adres ile büyük bir yapıya erişebilmek (tüm elemanları kopyalamak yerine) */
-void clear_matrix(GameMatrix gameMatrix, MatrixSize matrixSize)
+void clear_matrix(GameBoard *gameBoard)
 {
 	int i = 0, j = 0;
-	for(i = 0; i < MIDDLE_ROW(matrixSize.n); i++)
+	
+	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
+	
+	for(i = 0; i < MIDDLE_ROW(gameBoard->n); i++)
 	{
-		for(j = 0; j < matrixSize.m; j++)
+		for(j = 0; j < gameBoard->m; j++)
 		{
-			gameMatrix[i][j] = '\0';
+			gameBoard->matrix[i][j] = '\0';
 		}
 	}
 }
@@ -263,7 +284,7 @@ GameMode get_game_mode(void)
 	return (GameMode)gameMode;
 }
 
-GameOperation get_game_operation()
+GameOperation get_game_operation(void)
 {
 	int is_valid = 0, items_read = 0, gameOperation = 0; /* return'da cast edilir */
 	do
@@ -294,31 +315,33 @@ GameOperation get_game_operation()
 }
 
 /* oyun moduna göre gameMatrix'i kullanıcıdan alır veya rastgele oluşturur */
-void initialize_game_matrix(GameMatrix gameMatrix, MatrixSize matrixSize, GameMode gameMode)
+void initialize_game_matrix(GameBoard *gameBoard, GameMode gameMode)
 {
 	int is_valid = 0, i = 0, j = 0, k = 0;
 	char ch = '\0';
 	
+	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
+	
 	/* game_matrix'in boş kalması gereken kısımlarına '\0' değeri atanır */
-	clear_matrix(gameMatrix, matrixSize);
+	clear_matrix(gameBoard);
 	
 	if(gameMode == GAME_MODE_NORMAL)
 	{
-		for(i = MIDDLE_ROW(matrixSize.n); i < matrixSize.n; i++) /* n-n/2 dedik eğer direkt n/2 deseydik "üstten n/2 boş bırak" demiş olurduk, bu da tek sayıda satır varsa bir satır daha fazla dolu olmasına sebep olurdu." */
+		for(i = MIDDLE_ROW(gameBoard->n); i < gameBoard->n; i++) /* n-n/2 dedik eğer direkt n/2 deseydik "üstten n/2 boş bırak" demiş olurduk, bu da tek sayıda satır varsa bir satır daha fazla dolu olmasına sebep olurdu." */
 		{
-			for(j = 0; j < matrixSize.m; j++)
+			for(j = 0; j < gameBoard->m; j++)
 			{
-				gameMatrix[i][j] = game_characters[rand() % GAME_CHARACTERS_LENGTH]; /* rastgele bir indisdeki karakteri alır */
+				gameBoard->matrix[i][j] = game_characters[rand() % GAME_CHARACTERS_LENGTH]; /* rastgele bir indisdeki karakteri alır */
 			}
 		}
 	}
 	else if(gameMode == GAME_MODE_CONTROL)
 	{
 		printf( "Kontrol modunu seçtiniz %d-%d satırlarının başlangıç durumlarını girmeniz gerekmektedir.\n"
-				"Girebileceğiniz karakterler: [%.*s]\n", MIDDLE_ROW(matrixSize.n)+1, matrixSize.n, GAME_CHARACTERS_LENGTH, game_characters);
-		for(i = MIDDLE_ROW(matrixSize.n); i < matrixSize.n; i++) /* n-n/2 dedik eğer direkt n/2 deseydik "üstten n/2 boş bırak" demiş olurduk, bu da tek sayıda satır varsa bir satır daha fazla dolu olmasına sebep olurdu." */
+				"Girebileceğiniz karakterler: [%.*s]\n", MIDDLE_ROW(gameBoard->n)+1, gameBoard->n, GAME_CHARACTERS_LENGTH, game_characters);
+		for(i = MIDDLE_ROW(gameBoard->n); i < gameBoard->n; i++) /* n-n/2 dedik eğer direkt n/2 deseydik "üstten n/2 boş bırak" demiş olurduk, bu da tek sayıda satır varsa bir satır daha fazla dolu olmasına sebep olurdu." */
 		{
-			for(j = 0; j < matrixSize.m; j++)
+			for(j = 0; j < gameBoard->m; j++)
 			{				
 				/* Girdi kontrolü yapılıp eğer doğru karakter girildi ise atama yapılır, hatalı girdi ise hata mesajı verilir. */
 				do
@@ -340,16 +363,42 @@ void initialize_game_matrix(GameMatrix gameMatrix, MatrixSize matrixSize, GameMo
 						pause();
 					}				
 				}while(is_valid == 0);
-				gameMatrix[i][j] = ch; /* girdi kontrolü yapıldı, atama yapılabilir */
+				gameBoard->matrix[i][j] = ch; /* girdi kontrolü yapıldı, atama yapılabilir */
 			}
 		}
 	}
 }
 
-MovementCoords get_movement_coordinates(GameMatrix gameMatrix, MatrixSize matrixSize, GameStatus gameStatus)
+void do_gravity(GameBoard *gameBoard)
+{
+	int i = 0, j = 0, k = 0;
+	
+	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
+	
+	for(i = 0; i < gameBoard->n; i++)
+	{
+		for(j = 0, k = 0; j < gameBoard->m; j++)
+		{
+			if(gameBoard->matrix[i][j] != '\0')
+			{
+				if(k != j)
+				{
+					gameBoard->matrix[i][k] = gameBoard->matrix[i][j];
+				}
+				k++;
+			}
+		}
+	}
+}
+
+/* Eğer işlem kullanıcı tarafından iptal edilmek istenirse (rakam olmayan bir karaktere basılırsa) koordinat olarak {{-1, -1},{-1, -1}} döner. (normal şartlarda olmayacak bir koordinat) */
+MovementCoords get_movement_coordinates(const GameBoard *gameBoard, GameStatus gameStatus)
 {
 	int is_valid = 0, items_read = 0;
 	MovementCoords movementCoords = {{0, 0}, {0, 0}};
+	
+	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
+	
 	/* Yerleri değişecek iki koordinat kullanıcıdan alınır */
 	do
 	{
@@ -366,34 +415,34 @@ MovementCoords get_movement_coordinates(GameMatrix gameMatrix, MatrixSize matrix
 		{
 			/* burada hataları else if.. diye değil de direkt if ile kontrol etmemizin sebebi */
 			/* eğer birden fazla yanlış koordinat varsa hepsini birden kullanıcıya haber etsin için */
-			if(movementCoords.c1.i < MIN_GAME_MATRIX_POSITON || movementCoords.c1.i > MAX_GAME_MATRIX_POSITON)
+			if(movementCoords.c1.i < MIN_GAME_MATRIX_POSITION || movementCoords.c1.i > MAX_GAME_MATRIX_POSITION)
 			{
 				is_valid = 0;
 				printf("r1=%d değeri geçersiz aralıktadır!\n", movementCoords.c1.i);
 			}
-			if(movementCoords.c1.j < MIN_GAME_MATRIX_POSITON || movementCoords.c1.j > MAX_GAME_MATRIX_POSITON)
+			if(movementCoords.c1.j < MIN_GAME_MATRIX_POSITION || movementCoords.c1.j > MAX_GAME_MATRIX_POSITION)
 			{
 				is_valid = 0;
 				printf("c1=%d değeri geçersiz aralıktadır!\n", movementCoords.c1.j);
 			}
-			if(movementCoords.c2.i < MIN_GAME_MATRIX_POSITON || movementCoords.c2.i > MAX_GAME_MATRIX_POSITON)
+			if(movementCoords.c2.i < MIN_GAME_MATRIX_POSITION || movementCoords.c2.i > MAX_GAME_MATRIX_POSITION)
 			{
 				is_valid = 0;
 				printf("r2=%d değeri geçersiz aralıktadır!\n", movementCoords.c2.i);
 			}
-			if(movementCoords.c2.j < MIN_GAME_MATRIX_POSITON || movementCoords.c2.j > MAX_GAME_MATRIX_POSITON)
+			if(movementCoords.c2.j < MIN_GAME_MATRIX_POSITION || movementCoords.c2.j > MAX_GAME_MATRIX_POSITION)
 			{
 				is_valid = 0;
 				printf("c2=%d değeri geçersiz aralıktadır!\n", movementCoords.c2.j);
 			}
 			if(is_valid == 1) /* koordinatlar geçerli aralıkta, şimdi koordinatların yer değiştirip değiştiremeyeceğini kontrol et */
 			{
-				if(gameMatrix[movementCoords.c1.i-1][movementCoords.c1.j-1] == '\0')
+				if(gameBoard->matrix[movementCoords.c1.i-1][movementCoords.c1.j-1] == '\0')
 				{
 					is_valid = 0;
 					printf("Girdiğiniz 1. koordinatlarda (%d,%d) herhangi bir karakter bulunmamaktadır!\n", movementCoords.c1.i, movementCoords.c1.j);
 				}
-				if(gameMatrix[movementCoords.c2.i-1][movementCoords.c2.j-1] == '\0')
+				if(gameBoard->matrix[movementCoords.c2.i-1][movementCoords.c2.j-1] == '\0')
 				{
 					is_valid = 0;
 					printf("Girdiğiniz 2. koordinatlarda (%d,%d) herhangi bir karakter bulunmamaktadır!\n", movementCoords.c2.i, movementCoords.c2.j);
@@ -413,7 +462,7 @@ MovementCoords get_movement_coordinates(GameMatrix gameMatrix, MatrixSize matrix
 		if(is_valid == 0) /* hata oldu, kullanıcıya bilgi verildi, bekle */
 		{
 			pause();
-			print_status(gameMatrix, matrixSize, gameStatus);
+			print_status(gameBoard, gameStatus);
 		}
 	}while(is_valid == 0);
 	movementCoords.c1.i--, movementCoords.c1.j--, movementCoords.c2.i--, movementCoords.c2.j--;
@@ -421,39 +470,41 @@ MovementCoords get_movement_coordinates(GameMatrix gameMatrix, MatrixSize matrix
 }
 
 /* geri dönüş değeri olarak oyunun bitip bitmediğini döner (0 bitmedi, 1 bitti) */
-int do_movement(GameMatrix gameMatrix, MatrixSize matrixSize, GameStatus gameStatus, MovementCoords movementCoords)
+int do_movement(GameBoard *gameBoard, GameStatus gameStatus, MovementCoords movementCoords)
 {
 	int ended = 0, temp = 0, i = 0, j = 0;
 	char ch = '\0';
 	
-	ch = gameMatrix[movementCoords.c1.i][movementCoords.c1.j];
-	gameMatrix[movementCoords.c1.i][movementCoords.c1.j] = gameMatrix[movementCoords.c2.i][movementCoords.c2.j];
-	gameMatrix[movementCoords.c2.i][movementCoords.c2.j] = ch;
+	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
+	
+	ch = gameBoard->matrix[movementCoords.c1.i][movementCoords.c1.j];
+	gameBoard->matrix[movementCoords.c1.i][movementCoords.c1.j] = gameBoard->matrix[movementCoords.c2.i][movementCoords.c2.j];
+	gameBoard->matrix[movementCoords.c2.i][movementCoords.c2.j] = ch;
 	
 	/* Burada yer değiştirme işlemi yapıldıktan sonra, ama aşağı yeni satır eklemeden önce bizden matrisi yazdırmamız istendiği için */
-	print_status(gameMatrix, matrixSize, gameStatus);
+	print_status(gameBoard, gameStatus);
 	printf("Yer değiştirildi. Yeni satır ekleniyor\n");
 	pause();
 	
 	
 	
-	for(j = 0; j < matrixSize.m; j++) /* matrisin en altına yeni satırı ekleme döngüsü, her sütuna tek tek eklenir */
+	for(j = 0; j < gameBoard->m; j++) /* matrisin en altına yeni satırı ekleme döngüsü, her sütuna tek tek eklenir */
 	{
 		/* matrisin en alt satırından üst satırlara doğru kaydırma işlemi yapılır. */
 		/* en üstten başlamak daha az değişken kullanmamızı sağlardı ancak bu sefer önce boş olmayan satırı bulmamız gerekirdi (veya boş yere işlem gücü harcardık boş satırları kaydırarak) */
-		temp = gameMatrix[matrixSize.n-1][j];
-		i = matrixSize.n-2;
+		temp = gameBoard->matrix[gameBoard->n-1][j];
+		i = gameBoard->n-2;
 		while(i >= 0 && temp != '\0') /* temp != '\0' kontrolü ile gereksiz kaydırma işlemlerinden kaçınmış olduk */
 		{
-			int old_val = gameMatrix[i][j];
-			gameMatrix[i][j] = temp;
+			int old_val = gameBoard->matrix[i][j];
+			gameBoard->matrix[i][j] = temp;
 			temp = old_val;
 			i--;
 		}
 		/* sütundaki her satır bir üste kaydırıldı, şimdi rastgele yeni bir karakteri en alta yaz */
-		gameMatrix[matrixSize.n-1][j] = game_characters[rand() % GAME_CHARACTERS_LENGTH];
+		gameBoard->matrix[gameBoard->n-1][j] = game_characters[rand() % GAME_CHARACTERS_LENGTH];
 		/* en üst satırı kontrol et, eğer bir taş varsa ended = 1 */
-		if(gameMatrix[0][j] != '\0')
+		if(gameBoard->matrix[0][j] != '\0')
 		{
 			ended = 1; /* yani kaybettin */
 		}
@@ -463,17 +514,20 @@ int do_movement(GameMatrix gameMatrix, MatrixSize matrixSize, GameStatus gameSta
 	/* oyun sonlandırılmış. Ben de bana daha mantıklı gelen üst satırda herhangi dolu bir kutu varsa oyun bitsin şeklinde yaptım*/
 	if(ended == 1) /* en üst satırda 0 olmayan eleman var */
 	{
-		print_status(gameMatrix, matrixSize, gameStatus);
+		print_status(gameBoard, gameStatus);
 		printf("Oyun en üst satırda eleman bulunduğu için sonlandırılmıştır.");		
 	}
 	return ended;
 }
 
 /* Eğer işlem kullanıcı tarafından iptal edilmek istenirse (rakam olmayan bir karaktere basılırsa) koordinat olarak {-1, -1} döner. (normal şartlarda olmayacak bir koordinat) */
-Coord get_explosion_coordinate(GameMatrix gameMatrix, MatrixSize matrixSize, GameStatus gameStatus)
+Coord get_explosion_coordinate(const GameBoard *gameBoard, GameStatus gameStatus)
 {
 	int is_valid = 0, items_read = 0;
 	Coord coord = {0, 0};
+	
+	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
+	
 	do
 	{
 		is_valid = 1; /* girdinin en başta doğru olduğu varsayıldı */
@@ -487,18 +541,18 @@ Coord get_explosion_coordinate(GameMatrix gameMatrix, MatrixSize matrixSize, Gam
 		}
 		else
 		{
-			if(coord.i < MIN_GAME_MATRIX_POSITON || coord.i > MAX_GAME_MATRIX_POSITON)
+			if(coord.i < MIN_GAME_MATRIX_POSITION || coord.i > MAX_GAME_MATRIX_POSITION)
 			{
 				is_valid = 0;
 				printf("r=%d değeri geçersiz aralıktadır!\n", coord.i);
 			}
-			if(coord.j < MIN_GAME_MATRIX_POSITON || coord.j > MAX_GAME_MATRIX_POSITON)
+			if(coord.j < MIN_GAME_MATRIX_POSITION || coord.j > MAX_GAME_MATRIX_POSITION)
 			{
 				is_valid = 0;
 				printf("c=%d değeri geçersiz aralıktadır!\n", coord.j);
 			}
 			/* önce is_valid kontrol ettik ki eğer sınır dışında ise rastgele bellek adresine erişmeye çalışmasın */
-			if(is_valid == 1 && gameMatrix[coord.i-1][coord.j-1] == '\0') /* boş kutu patlatılamaz */
+			if(is_valid == 1 && gameBoard->matrix[coord.i-1][coord.j-1] == '\0') /* boş kutu patlatılamaz */
 			{
 				is_valid = 0;
 				printf("Girdiğiniz koordinatta (%d,%d) herhangi bir karakter bulunmamaktadır!\n", coord.i, coord.j);
@@ -507,7 +561,7 @@ Coord get_explosion_coordinate(GameMatrix gameMatrix, MatrixSize matrixSize, Gam
 		if(is_valid == 0) /* hata oldu, kullanıcıya bilgi ver */
 		{
 			pause();
-			print_status(gameMatrix, matrixSize, gameStatus);
+			print_status(gameBoard, gameStatus);
 		}
 	}while(is_valid == 0);
 	coord.i--, coord.j--;
@@ -515,7 +569,7 @@ Coord get_explosion_coordinate(GameMatrix gameMatrix, MatrixSize matrixSize, Gam
 }
 
 /* geri dönüş değeri olarak patlatılan taş sayısını döner */
-int do_explosion(GameMatrix gameMatrix, MatrixSize matrixSize, Coord coord)
+int do_explosion(GameBoard *gameBoard, Coord coord)
 {
 	int i = 0, j = 0, k = 0;
 	int explosionCount = 0;
@@ -524,13 +578,14 @@ int do_explosion(GameMatrix gameMatrix, MatrixSize matrixSize, Coord coord)
 	/* proje kapsamında patlatmak için elemanın sol üst köşe olduğu belirtildiği için */
 	/* sadece sağa ve aşağı doğru kontrol etmek yeterlidir. */
 	
+	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
 	
 	/* mesafelerin tespit edilmesi */
-	for(j = coord.j+1; j < matrixSize.m && gameMatrix[coord.i][j-1] == gameMatrix[coord.i][j]; j++) /* sağa doğru */
+	for(j = coord.j+1; j < gameBoard->m && gameBoard->matrix[coord.i][j-1] == gameBoard->matrix[coord.i][j]; j++) /* sağa doğru */
 	{
 		right_length++;
 	}
-	for(i = coord.i+1; i < matrixSize.n && gameMatrix[i-1][coord.j] == gameMatrix[i][coord.j]; i++) /* aşağı doğru */
+	for(i = coord.i+1; i < gameBoard->n && gameBoard->matrix[i-1][coord.j] == gameBoard->matrix[i][coord.j]; i++) /* aşağı doğru */
 	{
 		down_length++;
 	}
@@ -546,11 +601,11 @@ int do_explosion(GameMatrix gameMatrix, MatrixSize matrixSize, Coord coord)
 	{
 		for(j = 0; j < right_length; j++) /* daha önceden bulunan uzuluk kadar sütunun üstünü 1 aşağı aldık */
 		{
-			for(i = coord.i-1; i >= 0 && gameMatrix[i][coord.j+j] != '\0'; i--) /* sütunun dolu olduğu elemanları birer birer aşağı ötele */
+			for(i = coord.i-1; i >= 0 && gameBoard->matrix[i][coord.j+j] != '\0'; i--) /* sütunun dolu olduğu elemanları birer birer aşağı ötele */
 			{
-				gameMatrix[i+1][coord.j+j] = gameMatrix[i][coord.j+j]; /* satırı birer birer aşağı kaydır */
+				gameBoard->matrix[i+1][coord.j+j] = gameBoard->matrix[i][coord.j+j]; /* satırı birer birer aşağı kaydır */
 			}
-			gameMatrix[i+1][coord.j+j] = '\0'; /* aşağı düşmeden önce en üstte bulunan satır artık bir aşağıda, bunu 0 yapmalıyız. */
+			gameBoard->matrix[i+1][coord.j+j] = '\0'; /* aşağı düşmeden önce en üstte bulunan satır artık bir aşağıda, bunu 0 yapmalıyız. */
 		}
 		explosionCount += right_length; /* patlama gerçekleşti */
 	}
@@ -558,13 +613,13 @@ int do_explosion(GameMatrix gameMatrix, MatrixSize matrixSize, Coord coord)
 	{
 		/* bu dögüde k indisi patlama olan bölgenin üstündeki elemanları, i indisi patlama olan bölgeleri temsil eder */
 		k = coord.i-1;
-		for(i = coord.i-1+down_length; k >= 0 && gameMatrix[k][coord.j] != '\0'; i--, k--) /* TODO: k >= 0 gerekli değil */
+		for(i = coord.i-1+down_length; k >= 0 && gameBoard->matrix[k][coord.j] != '\0'; i--, k--) /* TODO: k >= 0 gerekli değil */
 		{
-			gameMatrix[i][coord.j] = gameMatrix[k][coord.j]; /* üstteki satırı down_length kadar aşağı al */
+			gameBoard->matrix[i][coord.j] = gameBoard->matrix[k][coord.j]; /* üstteki satırı down_length kadar aşağı al */
 		}
 		while(i > k) /* aşağı düşen satırları '\0' değeri atadık */
 		{
-			gameMatrix[i][coord.j] = '\0';
+			gameBoard->matrix[i][coord.j] = '\0';
 			i--;
 		}
 		explosionCount += down_length; /* patlama gerçekleşti */
@@ -576,11 +631,10 @@ int do_explosion(GameMatrix gameMatrix, MatrixSize matrixSize, Coord coord)
 int main()
 {
 	int ended = 0;
-	MatrixSize matrixSize = {0, 0};
-	GameMatrix gameMatrix;
+	GameBoard gameBoard = {0};
 	GameStatus gameStatus = {GAME_MODE_UNKNOWN, 0, 0};
 	GameOperation gameOperation = GAME_OPERATION_UNKNOWN;
-	
+	MatrixSize matrixSize = {0}; /* get_matrix_size fonksiyonunu geri dönüş değerini tutmak için kullanıldı */
 	
 	srand(time(NULL)); /* rastgele sayı üretmek için zamanı kullandık. basit bir oyun için yeterli bir "rastgelelik" sağlar */
 	
@@ -588,6 +642,8 @@ int main()
 	
 	/* Kullanıcıdan matris boyutunun alınması ve kontrol edilmesi, geçersizse gerekli mesajların yazılması */
 	matrixSize = get_matrix_size();
+	gameBoard.n = matrixSize.n;
+	gameBoard.m = matrixSize.m;
 	/* Kullanıcıdan matrisin boyunu alma işlemi bitti */
 	
 	
@@ -599,14 +655,14 @@ int main()
 	
 	
 	/* Modlara göre matrisi oluştur veya iste */
-	initialize_game_matrix(gameMatrix, matrixSize, gameStatus.gameMode);
+	initialize_game_matrix(&gameBoard, gameStatus.gameMode);
 	/* Modlara göre matrisi oluşturma işlemi bitti. */
 	
 	
 	/* Oynun asıl döngüsü */
 	do
 	{
-		print_status(gameMatrix, matrixSize, gameStatus);
+		print_status(&gameBoard, gameStatus);
 		
 		/* Kullanıcıdan yapılacak işlemin alınması ve kontrol edilmesi, gekerirse hata mesajlarının yazılması */
 		gameOperation = get_game_operation();
@@ -619,20 +675,20 @@ int main()
 		}
 		else if(gameOperation == GAME_OPERATION_MOVE) /* İki karakterin yerini değiştirmek istediğinde */
 		{
-			MovementCoords movementCoords = get_movement_coordinates(gameMatrix, matrixSize, gameStatus);
+			MovementCoords movementCoords = get_movement_coordinates(&gameBoard, gameStatus);
 			if(movementCoords.c1.i != -1 && movementCoords.c1.j != -1 && movementCoords.c2.i != -1 && movementCoords.c2.j != -1) /* işlem iptal edilmedi */
 			{
-				ended = do_movement(gameMatrix, matrixSize, gameStatus, movementCoords);
+				ended = do_movement(&gameBoard, gameStatus, movementCoords);
 				gameStatus.movementCount++;
 			}
 		}
 		/* patlatmak */
 		else /* operation == GAME_OPERATION_EXPLODE, ancak başka bir şey olamayacağı için direkt else dedik */
 		{
-			Coord coord = get_explosion_coordinate(gameMatrix, matrixSize, gameStatus);
+			Coord coord = get_explosion_coordinate(&gameBoard, gameStatus);
 			if(coord.i != -1 && coord.j != -1)
 			{
-				gameStatus.explosionCount += do_explosion(gameMatrix, matrixSize, coord);
+				gameStatus.explosionCount += do_explosion(&gameBoard, coord);
 			}
 		}
 	}while(ended == 0);
