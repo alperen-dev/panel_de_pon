@@ -1,22 +1,20 @@
-#include <stdio.h> /* printf scanf getchar */
-#include <stdlib.h> /* rastgele sayı üretmek için */
-#include <time.h> /* rastgele sayı üretirken seed'i zamana göre seçebilmek için */
-#include <assert.h> /* parametre olarak gönderilen pointerlerin NULL olup olmadığını kontrol ederken kullanılan assert makrosu */
-/* assert makrosu içindeki mantıksal ifade 0 ise hata verip programı kapatır */
+#include <stdio.h> /* printf, puts, scanf, getchar */
+#include <stdlib.h> /* rand, srand, system, abs */
+#include <time.h> /* time */
+#include <assert.h> /* assert */
 
-#define MAX_GAME_MATRIX_SIZE 20
-#define MIN_GAME_MATRIX_SIZE 3 /* 3x3'den az olduğunda herhangi bir patlama yapılamayacağı için 3 olarak belirledim, aslında dikey patlama için 4 yatay patlama için 3 olması gerekir yani (4x3) matris, şu anki haliyle sadece yatay patlama yapılabilir */
+#define MAX_GAME_MATRIX_SIZE 	20 	/* En büyük matris boyutu */
+#define MIN_GAME_MATRIX_SIZE 	3 	/* En küçük matris boyutu */
 
-#define MAX_GAME_MATRIX_POSITION 20
-#define MIN_GAME_MATRIX_POSITION 1
+#define MAX_GAME_MATRIX_POSITION 	20 	/* Yer değiştirme veya patlama için girilebilecek en büyük koordinat */
+#define MIN_GAME_MATRIX_POSITION 	1 	/* Yer değiştirme veya patlama için girilebilecek en küçük koordinat */
 
 #define GAME_CHARACTERS_LENGTH 5 /* oyundaki toplam karakter çeşiti sayısı */
 
+#define MIN_EXPLOSION_RANGE 3 /* en az bu kadar taş aynı tipte olmalı ki patlama olabilsin */
+
 /* Oyun ön bilgisindeki n/2 satırının indisini bulan makro */
 #define MIDDLE_ROW(n) ((n)-(n)/2)
-
-/* tek global değişken bu, tüm oyunda standart olarak kullanılacağı için global olarak tanımlandı */
-const char game_characters[GAME_CHARACTERS_LENGTH] = {'*', '/', '+', '%', 'O'};
 
 /* oyun matrisini tanımlarken kullanacağımız tipi tanımladık (direkt char game_matrix[][20] diyebilirdik, daha temiz durması için) */
 typedef char GameMatrix[MAX_GAME_MATRIX_SIZE][MAX_GAME_MATRIX_SIZE];
@@ -38,26 +36,40 @@ typedef enum GameOperation
 	GAME_OPERATION_EXPLODE = 2
 }GameOperation;
 
+typedef enum ExplosionDirection
+{
+	EXPLOSION_DIRECTION_NOT_VALID = 0, /* patlama olamaz demek */
+	EXPLOSION_DIRECTION_RIGHT = 1,
+	EXPLOSION_DIRECTION_DOWN = 2
+}ExplosionDirection;
+
 /* Oyun matrisini ve matrisin boyutunu içinde tutan yapı */
 typedef struct GameBoard
 {
 	GameMatrix matrix;
-	int n, m; /* n->row, m->column */
-	/* n ve m değişkenleri başta MatrixSize isimli başka bir struct içinde tutulmuştu */
-	/* ancak bu elemanlara erişim için kullanılacak kod çok uzadığı için (mesela gameBoard->matrixSize.n gibi) silindi */
+	int n; /* Row */
+	int m; /* Column */
 }GameBoard;
 
 /* Oyun tahtasındaki bir noktayı gösteren koordinatı temsil eden yapı */
 typedef struct Coord
 {
-	int i, j; /* i->row, j->column */
+	int i; /* Row */
+	int j; /* Column */
 }Coord;
 
 typedef struct MatrixSize
 {
-	int n, m; /* n->row, m->column */
+	int n; /* Row */
+	int m; /* Column */
 }MatrixSize;
-/* Not: modern c standartlarında isimsiz birlik (union) kullanıp MatrixSize ve Coord yapılarını tek bir yapı olarak tanımlayabilirdik */
+
+typedef struct ExplosionInfo
+{
+	ExplosionDirection explosionDirection;
+	Coord coord;
+	int range;
+}ExplosionInfo;
 
 /* Hareket hamlesi için gerekli olan iki koordinatı saklayan yapı */
 typedef struct MovementCoords
@@ -69,8 +81,62 @@ typedef struct MovementCoords
 /* Oyun durumunu tek paket içinde tutmamızı sağlayan yapı */
 typedef struct GameStatus
 {
-	int gameMode, movementCount, explosionCount;
+	GameMode gameMode;
+	int movementCount, explosionCount;
 }GameStatus;
+
+/* oyunda kullanılacak karakterler */
+const char gameCharacters[GAME_CHARACTERS_LENGTH] = {'*', '/', '+', '%', 'O'};
+
+/* Stdin'deki çöp değerleri temizler */
+void clear_stdin()
+{
+	int temp;
+	while((temp = getchar()) != '\n' && temp != EOF);
+}
+
+/* Terminal ekranını temizler */
+void clear_screen()
+{
+	/* terminali temizlemek için önişlemci komutları ile işletim sistemi tespit edilir */
+	/* eğer herhangi geçerli bir sistem tespit edilmezse 1000 kere \n basılır (işlevsel) */
+	#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(_WIN64) /* windows 32-bit veya 64-bit */
+		system("cls");
+	#elif defined(__MSDOS__) || defined(__DOS__) || defined(MSDOS) || defined(_MSDOS) /* freedos veya dos-like (watcom) */
+		system("cls");
+	#elif defined(__APPLE__) || defined(__linux__) || defined(__unix__) /* unix like */
+		system("clear");
+	#else /* herhangi platform tespit edilemedi kaba yöntemle temizle */
+		int i = 0;
+		for(i = 0; i < 1000; i++)
+		{
+			printf("\n");
+		}
+	#endif
+}
+
+/* Oyun kurallarına göre en başta boş olması gereken yerlere '\0' karakterlerini doldurur */
+void clear_matrix(GameBoard *gameBoard)
+{
+	int i = 0, j = 0;
+	
+	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
+	
+	for(i = 0; i < MIDDLE_ROW(gameBoard->n); i++)
+	{
+		for(j = 0; j < gameBoard->m; j++)
+		{
+			gameBoard->matrix[i][j] = '\0';
+		}
+	}
+}
+
+/* Mantık olarak powershell'deki pause komutuna benzer bir fonksiyon, enter tuşuna basana kadar bekler */
+void pause() 
+{
+	printf("Devam etmek için Enter (Return) tuşuna basın . . .\n");
+	clear_stdin(); /* bu fonksyion zaten getchar'ı çağırdığı için bir daha getchar çağırmamıza gerek yok */
+}
 
 /* Oyun ilk açıldığında ekrana yazılacak yazıları barındıran fonksiyon */
 void print_splash_screen()
@@ -78,20 +144,21 @@ void print_splash_screen()
 	/* stringleri parçalara ayırdık çünkü bu kadar uzun bir string c89 (ansi c) tarafından desteklenmez (null hariç en fazla 509 karakter) */
 	puts(
 			"Panel De Pon oyununa hoş geldiniz!\n"
-			"Bu oynun amacı karakterler en üst satıra değmeden en fazla sayıda element patlatmaya çalışmaktır\n"
+			"Bu oyunun amacı karakterler en üst satıra değmeden en fazla sayıda element patlatmaya çalışmaktır\n"
 			"Oyun karakterleri: [*/+%O]\n"
 			"\n"
 			"Oyun kuralları: \n"
 			" 1- İki elementi yer değiştirmek istediğinizde sadece komşu iki elementlerin yerlerini değiştirebilirsiniz\n"
-			" 2- İki elementin yerleri değiştirildiğinde tüm satırlar birer yukarı kayar ve en alt satıra rastgele elementler eklenir"
+			" 2- Yerleri değişecek elemanlar birbirinden farklı olmalıdır\n"
+			" 3- İki elementin yerleri değiştirildiğinde tüm satırlar birer yukarı kayar ve en alt satıra rastgele elementler eklenir"
 		);
-	puts(	" 3- En üst satıra herhangi bir element ulaştığında oyun direkt sona erer\n"
-			" 4- Bir element grubunu patlatabilmek için en az 3 tane yan yana veya alt alta aynı elementten bulunmalıdır\n"
-			" 5- Eğer hem dikey hem yatay patlama olabiliyorsa oyun en fazla element patlayabilecek olanı seçecektir\n"
-			" 6- Eğer dikey ve yatay patlayabilecek element sayısı eşitse oyun yatay olanı seçer"
+	puts(	" 4- En üst satıra herhangi bir element ulaştığında oyun direkt sona erer\n"
+			" 5- Bir element grubunu patlatabilmek için en az 3 tane yan yana veya alt alta aynı elementten bulunmalıdır\n"
+			" 6- Eğer hem dikey hem yatay patlama olabiliyorsa oyun en fazla element patlayabilecek olanı seçecektir\n"
+			" 7- Eğer dikey ve yatay patlayabilecek element sayısı eşitse oyun yatay olanı seçer"
 		);
-	puts(	" 7- Bir element grubunu patlatmaya karar verdiğinizde bu grubun en üst veya en sol elementinin koordinatını girmeniz gerekmektedir\n"
-			" 8- Yer değiştirme veya patlama işlemi seçildikten sonra koordinat yerine rakam olmayan bir karakter girmek işlemi iptal etmeyi sağlar\n"
+	puts(	" 8- Bir element grubunu patlatmaya karar verdiğinizde bu grubun en üst veya en sol elementinin koordinatını girmeniz gerekmektedir\n"
+			" 9- Yer değiştirme veya patlama işlemi seçildikten sonra koordinat yerine rakam olmayan bir karakter girmek işlemi iptal etmeyi sağlar\n"
 			"\n"
 			"Oyun Modları: \n"
 			" 1- Normal Mod:\n"
@@ -103,42 +170,8 @@ void print_splash_screen()
 		);
 }
 
-/* fgets dışında bir yöntemle input aldığın zaman bunu kullanmak gerekir */
-/* fgets \n dahil olmak üzere tüm stdin bufferini kendine alır */
-/* ancak scanf, getchar gibi fonksiyonlar input buffer'deki tüm değerleri almaz */
-/* bu yüzden bu fonksiyonları çağırdığımızda stdin bufferinde \n gibi çöp değerler kalabilir */
-/* bu fonksiyonun amacı ise stdin'deki bu çöp değerleri temizlemektir */
-void clear_stdin()
-{
-	int temp;
-	while((temp = getchar()) != '\n' && temp != EOF);
-}
-
-/* terminali temizlemek için önişlemci komutları ile işletim sistemi tespit edilir */
-/* eğer herhangi geçerli bir sistem tespit edilmezse 1000 kere \n basılır (işlevsel) */
-void clear_screen()
-{
-	/* https://stackoverflow.com/a/5920028 */
-	#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(_WIN64) /* windows 32-bit veya 64-bit */
-		system("cls");
-	#elif defined(__MSDOS__) || defined(__DOS__) || defined(MSDOS) || defined(_MSDOS) /* freedos veya dos-like (watcom) */
-		system("cls");
-	#elif defined(__APPLE__) || defined(__linux__) || defined(__unix__) /* unix like */
-		system("clear");
-	#else /* herhangi platform özelinde fonksiyon kullanmadan kaba yöntemle temizle */
-		int i = 0;
-		for(i = 0; i < 1000; i++)
-		{
-			printf("\n");
-		}
-	#endif
-}
-
-
-/* tablo yaparken |-+ karakterleri yerine direkt tablo karakterleri kullanılabilirdi ancak kodun taşınabilirliği azalırdı */
-/* Çünkü modern sistemlerde kullanılan UNICODE'e göre tablo karakterleri ile eski tip (ANSI) tablo karakterlerinin karakter kodları farklı */
-/* bu da UNICODE kullanan terminaller ile ANSI kullanan terminaller arasında taşınabilirliği azaltırdı */
-void print_matrix(const GameBoard *gameBoard) /* genel bir fonksiyon değil, iyi bir görünüm için en fazla 20 sütun destekler */
+/* Oyun tahtasındaki matrisi boyuta uygun bir biçimde ekrana yazdırır */
+void print_matrix(const GameBoard *gameBoard)
 {
 	int i = 0, j = 0;
 	
@@ -179,17 +212,7 @@ void print_matrix(const GameBoard *gameBoard) /* genel bir fonksiyon değil, iyi
 	}
 }
 
-
-/* mantık olarak powershell'deki pause komutuna benzer bir fonksiyon, enter tuşuna basana kadar bekler */
-void pause() 
-{
-	printf("Devam etmek için Enter (Return) tuşuna basın . . .\n");
-	clear_stdin(); /* bu fonksyion zaten getchar'ı çağırdığı için bir daha getchar çağırmamıza gerek yok */
-}
-
-/* Oyunun o anki durumunu yazan fonksiyon, bu fonksiyonun kullanılma sebebi oyun döngüsünde birden fazla yerde */
-/* oyun matrisini ve puanları yazdırmamızın gerekmesi. parametre olarak verilen değerlere ve moda göre ekranda */
-/* yazılacak metinleri ayarlar. */
+/* Oyunun o anki durumunu yazan fonksiyon, parametre olarak verilen değerlere ve moda göre ekranda yazılacak metinleri ayarlar. */
 void print_status(const GameBoard *gameBoard, GameStatus gameStatus)
 {
 	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
@@ -203,23 +226,7 @@ void print_status(const GameBoard *gameBoard, GameStatus gameStatus)
 	print_matrix(gameBoard);
 }
 
-/* 1. parametredeki matrisin tüm değerlerini 2. parametredeki adresde bulunan MatrixSize yapısına göre '\0' yapar */
-void clear_matrix(GameBoard *gameBoard)
-{
-	int i = 0, j = 0;
-	
-	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
-	
-	for(i = 0; i < MIDDLE_ROW(gameBoard->n); i++)
-	{
-		for(j = 0; j < gameBoard->m; j++)
-		{
-			gameBoard->matrix[i][j] = '\0';
-		}
-	}
-}
-
-/* oyunun en başnda kullanıcıdan matrisin boyutunu almak için fonksiyon */
+/* Kullanıcıdan matrisin boyutunu ister */
 MatrixSize get_matrix_size(void)
 {
 	int is_valid = 0, items_read = 0;
@@ -258,7 +265,7 @@ MatrixSize get_matrix_size(void)
 	return matrixSize;
 }
 
-/* kullanıcıdan oyun modu istenir */
+/* Kullanıcıdan oyun modu istenir */
 GameMode get_game_mode(void)
 {
 	int is_valid = 0, items_read = 0, gameMode = 0; /* return'de cast edilir */
@@ -272,18 +279,21 @@ GameMode get_game_mode(void)
 		{
 			printf("Geçersiz girdi, bu girdi için %d veya %d tamsayı değerlerini girmelisiniz!\n", GAME_MODE_NORMAL, GAME_MODE_CONTROL);
 			is_valid = 0;
-			pause();
 		}
 		else if(gameMode != GAME_MODE_NORMAL && gameMode != GAME_MODE_CONTROL)
 		{
 			printf("Geçersiz mod, geçerli modlar: %d ve %d\n", GAME_MODE_NORMAL, GAME_MODE_CONTROL);
 			is_valid = 0;
+		}
+		if(is_valid == 0)
+		{
 			pause();
 		}
 	}while(is_valid == 0);
 	return (GameMode)gameMode;
 }
 
+/* Kullanıcıdan yer değişikliği mi patlama mı istediği sorulur */
 GameOperation get_game_operation(void)
 {
 	int is_valid = 0, items_read = 0, gameOperation = 0; /* return'da cast edilir */
@@ -312,83 +322,6 @@ GameOperation get_game_operation(void)
 		}
 	}while(is_valid == 0);
 	return (GameOperation)gameOperation;
-}
-
-/* oyun moduna göre gameMatrix'i kullanıcıdan alır veya rastgele oluşturur */
-void initialize_game_matrix(GameBoard *gameBoard, GameMode gameMode)
-{
-	int is_valid = 0, i = 0, j = 0, k = 0;
-	char ch = '\0';
-	
-	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
-	
-	/* game_matrix'in boş kalması gereken kısımlarına '\0' değeri atanır */
-	clear_matrix(gameBoard);
-	
-	if(gameMode == GAME_MODE_NORMAL)
-	{
-		for(i = MIDDLE_ROW(gameBoard->n); i < gameBoard->n; i++) /* n-n/2 dedik eğer direkt n/2 deseydik "üstten n/2 boş bırak" demiş olurduk, bu da tek sayıda satır varsa bir satır daha fazla dolu olmasına sebep olurdu." */
-		{
-			for(j = 0; j < gameBoard->m; j++)
-			{
-				gameBoard->matrix[i][j] = game_characters[rand() % GAME_CHARACTERS_LENGTH]; /* rastgele bir indisdeki karakteri alır */
-			}
-		}
-	}
-	else if(gameMode == GAME_MODE_CONTROL)
-	{
-		printf( "Kontrol modunu seçtiniz %d-%d satırlarının başlangıç durumlarını girmeniz gerekmektedir.\n"
-				"Girebileceğiniz karakterler: [%.*s]\n", MIDDLE_ROW(gameBoard->n)+1, gameBoard->n, GAME_CHARACTERS_LENGTH, game_characters);
-		for(i = MIDDLE_ROW(gameBoard->n); i < gameBoard->n; i++) /* n-n/2 dedik eğer direkt n/2 deseydik "üstten n/2 boş bırak" demiş olurduk, bu da tek sayıda satır varsa bir satır daha fazla dolu olmasına sebep olurdu." */
-		{
-			for(j = 0; j < gameBoard->m; j++)
-			{				
-				/* Girdi kontrolü yapılıp eğer doğru karakter girildi ise atama yapılır, hatalı girdi ise hata mesajı verilir. */
-				do
-				{
-					is_valid = 1;
-					printf("%d. satır, %d. sütun karakterini giriniz: ", i+1, j+1);
-					scanf(" %c", &ch); /* %c değerinde bulunan boşluk kullanıcının hatalı girdi yapmasını önleyebilir. (girilen karakterden önceki white spaceleri atlayarak) */
-					clear_stdin();
-					k = 0;
-					while((k < GAME_CHARACTERS_LENGTH) && (ch != game_characters[k])) /* girilen karakterin oyun karakteri olup olmadığına karar veren döngü */
-					{
-						k++;
-					}
-					if(k >= GAME_CHARACTERS_LENGTH) /* Geçersiz girdi */
-					{
-						printf( "\'%c\' karakteri geçerli bir oyun karakteri değil!\n"
-								"Geçerli oyun karakterleri şunlardır: [%.*s]\n", ch, GAME_CHARACTERS_LENGTH, game_characters);
-						is_valid = 0;
-						pause();
-					}				
-				}while(is_valid == 0);
-				gameBoard->matrix[i][j] = ch; /* girdi kontrolü yapıldı, atama yapılabilir */
-			}
-		}
-	}
-}
-
-void do_gravity(GameBoard *gameBoard)
-{
-	int i = 0, j = 0, k = 0;
-	
-	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
-	
-	for(i = 0; i < gameBoard->n; i++)
-	{
-		for(j = 0, k = 0; j < gameBoard->m; j++)
-		{
-			if(gameBoard->matrix[i][j] != '\0')
-			{
-				if(k != j)
-				{
-					gameBoard->matrix[i][k] = gameBoard->matrix[i][j];
-				}
-				k++;
-			}
-		}
-	}
 }
 
 /* Eğer işlem kullanıcı tarafından iptal edilmek istenirse (rakam olmayan bir karaktere basılırsa) koordinat olarak {{-1, -1},{-1, -1}} döner. (normal şartlarda olmayacak bir koordinat) */
@@ -452,11 +385,14 @@ MovementCoords get_movement_coordinates(const GameBoard *gameBoard, GameStatus g
 					is_valid = 0;
 					printf("(%d,%d) koordinatları ile (%d,%d) koordinatları yan yana değil!\n", movementCoords.c1.i, movementCoords.c1.j, movementCoords.c2.i, movementCoords.c2.j);
 				}
-				/*else if(abs(movementCoords.c1.i-movementCoords.c2.i)+abs(movementCoords.c1.j-movementCoords.c2.j) != 1) // koordinatlar yan yana veya alt alta değil, sadece yan yana veya alt alta koordinatlar yer değiştirebilir
+				if(is_valid == 1) /* karakterlerin yer değiştimesinin önündeki tek engel: aynı olmaları */
 				{
-					is_valid = 0;
-					printf("(%d,%d) koordinatları ile (%d,%d) koordinatları yan yana veya alt alta değil!\n", movementCoords.c1.i, movementCoords.c1.j, movementCoords.c2.i, movementCoords.c2.j);
-				}*/
+					if(gameBoard->matrix[movementCoords.c1.i-1][movementCoords.c1.j-1] == gameBoard->matrix[movementCoords.c2.i-1][movementCoords.c2.j-1])
+					{
+						is_valid = 0;
+						printf("(%d,%d) koordinatındaki karakter ile (%d,%d) koordinatındaki karakter aynıdır: \'%c\'\n", movementCoords.c1.i, movementCoords.c1.j, movementCoords.c2.i, movementCoords.c2.j, gameBoard->matrix[movementCoords.c1.i-1][movementCoords.c1.j-1]);
+					}
+				}
 			}
 		}
 		if(is_valid == 0) /* hata oldu, kullanıcıya bilgi verildi, bekle */
@@ -467,57 +403,6 @@ MovementCoords get_movement_coordinates(const GameBoard *gameBoard, GameStatus g
 	}while(is_valid == 0);
 	movementCoords.c1.i--, movementCoords.c1.j--, movementCoords.c2.i--, movementCoords.c2.j--;
 	return movementCoords;
-}
-
-/* geri dönüş değeri olarak oyunun bitip bitmediğini döner (0 bitmedi, 1 bitti) */
-int do_movement(GameBoard *gameBoard, GameStatus gameStatus, MovementCoords movementCoords)
-{
-	int ended = 0, temp = 0, i = 0, j = 0;
-	char ch = '\0';
-	
-	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
-	
-	ch = gameBoard->matrix[movementCoords.c1.i][movementCoords.c1.j];
-	gameBoard->matrix[movementCoords.c1.i][movementCoords.c1.j] = gameBoard->matrix[movementCoords.c2.i][movementCoords.c2.j];
-	gameBoard->matrix[movementCoords.c2.i][movementCoords.c2.j] = ch;
-	
-	/* Burada yer değiştirme işlemi yapıldıktan sonra, ama aşağı yeni satır eklemeden önce bizden matrisi yazdırmamız istendiği için */
-	print_status(gameBoard, gameStatus);
-	printf("Yer değiştirildi. Yeni satır ekleniyor\n");
-	pause();
-	
-	
-	
-	for(j = 0; j < gameBoard->m; j++) /* matrisin en altına yeni satırı ekleme döngüsü, her sütuna tek tek eklenir */
-	{
-		/* matrisin en alt satırından üst satırlara doğru kaydırma işlemi yapılır. */
-		/* en üstten başlamak daha az değişken kullanmamızı sağlardı ancak bu sefer önce boş olmayan satırı bulmamız gerekirdi (veya boş yere işlem gücü harcardık boş satırları kaydırarak) */
-		temp = gameBoard->matrix[gameBoard->n-1][j];
-		i = gameBoard->n-2;
-		while(i >= 0 && temp != '\0') /* temp != '\0' kontrolü ile gereksiz kaydırma işlemlerinden kaçınmış olduk */
-		{
-			int old_val = gameBoard->matrix[i][j];
-			gameBoard->matrix[i][j] = temp;
-			temp = old_val;
-			i--;
-		}
-		/* sütundaki her satır bir üste kaydırıldı, şimdi rastgele yeni bir karakteri en alta yaz */
-		gameBoard->matrix[gameBoard->n-1][j] = game_characters[rand() % GAME_CHARACTERS_LENGTH];
-		/* en üst satırı kontrol et, eğer bir taş varsa ended = 1 */
-		if(gameBoard->matrix[0][j] != '\0')
-		{
-			ended = 1; /* yani kaybettin */
-		}
-	}
-	/* kaydırma işlemi bitti */
-	/* proje ön bilgisinde "Oyun tüm alan doluncaya" kadar denmiş ancak örnekte üst satırda birkaç tane sütun dolduğunda */
-	/* oyun sonlandırılmış. Ben de bana daha mantıklı gelen üst satırda herhangi dolu bir kutu varsa oyun bitsin şeklinde yaptım*/
-	if(ended == 1) /* en üst satırda 0 olmayan eleman var */
-	{
-		print_status(gameBoard, gameStatus);
-		printf("Oyun en üst satırda eleman bulunduğu için sonlandırılmıştır.");		
-	}
-	return ended;
 }
 
 /* Eğer işlem kullanıcı tarafından iptal edilmek istenirse (rakam olmayan bir karaktere basılırsa) koordinat olarak {-1, -1} döner. (normal şartlarda olmayacak bir koordinat) */
@@ -568,64 +453,230 @@ Coord get_explosion_coordinate(const GameBoard *gameBoard, GameStatus gameStatus
 	return coord;
 }
 
-/* geri dönüş değeri olarak patlatılan taş sayısını döner */
-int do_explosion(GameBoard *gameBoard, Coord coord)
+/* Oyun moduna göre gameMatrix'i kullanıcıdan alır veya rastgele oluşturur */
+void do_initialize_game_matrix(GameBoard *gameBoard, GameMode gameMode)
 {
-	int i = 0, j = 0, k = 0;
-	int explosionCount = 0;
-	int right_length = 1, down_length = 1; /* hangisi daha fazlaysa o kullanılacak, 1'den başlattık çünkü kendisi de arıyor */
-	/* Şimdi bu koordinatta patlama olabilir mi onu kontrol etmeliyiz */
-	/* proje kapsamında patlatmak için elemanın sol üst köşe olduğu belirtildiği için */
-	/* sadece sağa ve aşağı doğru kontrol etmek yeterlidir. */
+	int is_valid = 0, i = 0, j = 0, k = 0;
+	char ch = '\0';
 	
 	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
 	
-	/* mesafelerin tespit edilmesi */
-	for(j = coord.j+1; j < gameBoard->m && gameBoard->matrix[coord.i][j-1] == gameBoard->matrix[coord.i][j]; j++) /* sağa doğru */
+	/* game_matrix'in boş kalması gereken kısımlarına '\0' değeri atanır */
+	clear_matrix(gameBoard);
+	
+	if(gameMode == GAME_MODE_NORMAL)
+	{
+		for(i = MIDDLE_ROW(gameBoard->n); i < gameBoard->n; i++) /* n-n/2 dedik eğer direkt n/2 deseydik "üstten n/2 boş bırak" demiş olurduk, bu da tek sayıda satır varsa bir satır daha fazla dolu olmasına sebep olurdu." */
+		{
+			for(j = 0; j < gameBoard->m; j++)
+			{
+				gameBoard->matrix[i][j] = gameCharacters[rand() % GAME_CHARACTERS_LENGTH]; /* rastgele bir indisdeki karakteri alır */
+			}
+		}
+	}
+	else if(gameMode == GAME_MODE_CONTROL)
+	{
+		printf( "Kontrol modunu seçtiniz %d-%d satırlarının başlangıç durumlarını girmeniz gerekmektedir.\n"
+				"Girebileceğiniz karakterler: [%.*s]\n", MIDDLE_ROW(gameBoard->n)+1, gameBoard->n, GAME_CHARACTERS_LENGTH, gameCharacters);
+		for(i = MIDDLE_ROW(gameBoard->n); i < gameBoard->n; i++) /* n-n/2 dedik eğer direkt n/2 deseydik "üstten n/2 boş bırak" demiş olurduk, bu da tek sayıda satır varsa bir satır daha fazla dolu olmasına sebep olurdu." */
+		{
+			for(j = 0; j < gameBoard->m; j++)
+			{				
+				/* Girdi kontrolü yapılıp eğer doğru karakter girildi ise atama yapılır, hatalı girdi ise hata mesajı verilir. */
+				do
+				{
+					is_valid = 1;
+					printf("%d. satır, %d. sütun karakterini giriniz: ", i+1, j+1);
+					scanf(" %c", &ch); /* %c değerinde bulunan boşluk kullanıcının hatalı girdi yapmasını önleyebilir. (girilen karakterden önceki white spaceleri atlayarak) */
+					clear_stdin();
+					k = 0;
+					while((k < GAME_CHARACTERS_LENGTH) && (ch != gameCharacters[k])) /* girilen karakterin oyun karakteri olup olmadığına karar veren döngü (döngü yerine 16-byte'lik (ascii ilk 128 byte) bitmap lookup table kullanılabilirdi, ancak veri 5'byte olduğu için değmez) */
+					{
+						k++;
+					}
+					if(k >= GAME_CHARACTERS_LENGTH) /* Geçersiz girdi */
+					{
+						printf( "\'%c\' karakteri geçerli bir oyun karakteri değil!\n"
+								"Geçerli oyun karakterleri şunlardır: [%.*s]\n", ch, GAME_CHARACTERS_LENGTH, gameCharacters);
+						is_valid = 0;
+						pause();
+					}				
+				}while(is_valid == 0);
+				gameBoard->matrix[i][j] = ch; /* girdi kontrolü yapıldı, atama yapılabilir */
+			}
+		}
+	}
+}
+
+/* ExplosionInfo'ya göre yer çekimi etkisini uygular */
+void do_gravity(GameBoard *gameBoard, ExplosionInfo *explosionInfo)
+{
+	int i = 0, j = 0;
+	
+	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
+	assert(explosionInfo != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
+	
+	if(explosionInfo->explosionDirection == EXPLOSION_DIRECTION_RIGHT)
+	{
+		for(j = explosionInfo->coord.j; j < explosionInfo->coord.j+explosionInfo->range; j++) /* sadece patlamanın etkilediği sütunlara bak */
+		{
+			for(i = explosionInfo->coord.i-1; i >= 0 && gameBoard->matrix[i][j] != '\0'; i--) /* patlamanın olduğu satırın bir üstünden başla ve en tepedeki boşluğu görene kadar devam et, normal şartlarda bir sütunda sadece patlama olan yerler ve boşluk '\0' olur */
+			{
+				gameBoard->matrix[i+1][j] = gameBoard->matrix[i][j];
+			}
+			gameBoard->matrix[i+1][j] = '\0'; /* aşağı alınan en son satırdaki değeri '\0' yaptık, çünkü o artık aşağıda */
+		}
+	}
+	else if(explosionInfo->explosionDirection == EXPLOSION_DIRECTION_DOWN)
+	{
+		for(i = explosionInfo->coord.i-1; i >= 0 && gameBoard->matrix[i][j] != '\0'; i--) /* patlamanın olduğu satırın bir üstünden başla ve en tepedeki boşluğu görene kadar devam et, normal şartlarda bir sütunda sadece patlama olan yerler ve boşluk '\0' olur */
+		{
+			gameBoard->matrix[i+explosionInfo->range][explosionInfo->coord.j] = gameBoard->matrix[i][explosionInfo->coord.j]; /* üstteki değer patlama menzili kadar aşağı alındı */
+			gameBoard->matrix[i][explosionInfo->coord.j] = '\0'; /* aşağı alınan satırdaki değer '\0' yapıldı */
+		}
+	}
+}
+
+/* Verilen konuma göre patlama olup olamayacağını, olursa ne yöne olacağını ayarlar. ve patlama olacak yerleri '\0' karakteri ile doldurur. */
+void do_explosion(GameBoard *gameBoard, ExplosionInfo *explosionInfo)
+{
+	int i = 0, j = 0;
+	int right_length = 1, down_length = 1; /* 1'den başlıyor çünkü kendisini de sayar */
+	
+	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
+	assert(explosionInfo != NULL);
+	
+	for(j = explosionInfo->coord.j+1; j < gameBoard->m && gameBoard->matrix[explosionInfo->coord.i][j-1] == gameBoard->matrix[explosionInfo->coord.i][j]; j++) /* sağa doğru */
 	{
 		right_length++;
 	}
-	for(i = coord.i+1; i < gameBoard->n && gameBoard->matrix[i-1][coord.j] == gameBoard->matrix[i][coord.j]; i++) /* aşağı doğru */
+	for(i = explosionInfo->coord.i+1; i < gameBoard->n && gameBoard->matrix[i-1][explosionInfo->coord.j] == gameBoard->matrix[i][explosionInfo->coord.j]; i++) /* aşağı doğru */
 	{
 		down_length++;
 	}
+	/* Mesafeler hesaplandı, bu bilgilere göre ExplosionInfo doldurulur */
 	
-	/* Herhangi bir patlama olamadığı durum için */
-	if((down_length < 3) && (right_length < 3))
+	/* Eğer mesafeler eşit ise sağa doğru olan patlamanın oyun ömrünü uzatması daha muhtemel olduğu için sağa doğru patlatılır */
+	if(right_length >= down_length)
 	{
-		printf("Herhangi bir patlama olamadı!\n");
-		pause();
-	}
-	/* mesafesi fazla olan ve 3'den büyük eşit olan yöne doğru patlatma işlemini yap */
-	else if(right_length >= down_length) /* > değil >= çünkü satır patlarmak oyunun daha uzun süre bitmemesini sağlayabilir (bence) */
-	{
-		for(j = 0; j < right_length; j++) /* daha önceden bulunan uzuluk kadar sütunun üstünü 1 aşağı aldık */
+		if(right_length >= MIN_EXPLOSION_RANGE)
 		{
-			for(i = coord.i-1; i >= 0 && gameBoard->matrix[i][coord.j+j] != '\0'; i--) /* sütunun dolu olduğu elemanları birer birer aşağı ötele */
+			explosionInfo->explosionDirection = EXPLOSION_DIRECTION_RIGHT;
+			explosionInfo->range = right_length;
+			/* Bu döngünün amacı sadece görselliktir, çünkü yer çekimi fonksiyonu değerin '\0'  olduğuna değil explosionInfo->range'ye bakar */
+			for(j = explosionInfo->coord.j; j < explosionInfo->coord.j+right_length; j++)
 			{
-				gameBoard->matrix[i+1][coord.j+j] = gameBoard->matrix[i][coord.j+j]; /* satırı birer birer aşağı kaydır */
+				gameBoard->matrix[explosionInfo->coord.i][j] = '\0';
 			}
-			gameBoard->matrix[i+1][coord.j+j] = '\0'; /* aşağı düşmeden önce en üstte bulunan satır artık bir aşağıda, bunu 0 yapmalıyız. */
 		}
-		explosionCount += right_length; /* patlama gerçekleşti */
 	}
-	else /* Burada bir şeyi kontrol etmemize gerek yok zaten ilk iki if'in olmama durumunda aşağı uzunluk sağ uzunluktan büyük ve aşağı uzunluk yeterli bir uzunluğu sahip */
+	else
 	{
-		/* bu dögüde k indisi patlama olan bölgenin üstündeki elemanları, i indisi patlama olan bölgeleri temsil eder */
-		k = coord.i-1;
-		for(i = coord.i-1+down_length; k >= 0 && gameBoard->matrix[k][coord.j] != '\0'; i--, k--) /* TODO: k >= 0 gerekli değil */
+		if(down_length >= MIN_EXPLOSION_RANGE)
 		{
-			gameBoard->matrix[i][coord.j] = gameBoard->matrix[k][coord.j]; /* üstteki satırı down_length kadar aşağı al */
+			explosionInfo->explosionDirection = EXPLOSION_DIRECTION_DOWN;
+			explosionInfo->range = down_length;
+			/* Bu döngünün amacı sadece görselliktir, çünkü yer çekimi fonksiyonu değerin '\0'  olduğuna değil explosionInfo->range'ye bakar */
+			for(i = explosionInfo->coord.i; i < explosionInfo->coord.i+down_length; i++)
+			{
+				gameBoard->matrix[i][explosionInfo->coord.j] = '\0';
+			}
 		}
-		while(i > k) /* aşağı düşen satırları '\0' değeri atadık */
+	}
+}
+
+/* geri dönüş değeri olarak oyunun bitip bitmediğini döner (0 bitmedi, 1 bitti) */
+int do_append_new_random_row(GameBoard *gameBoard)
+{
+	int ended = 0, temp = 0, i = 0, j = 0;
+	
+	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
+	
+	for(j = 0; j < gameBoard->m; j++) /* matrisin en altına yeni satırı ekleme döngüsü, her sütuna tek tek eklenir */
+	{
+		/* matrisin en alt satırından üst satırlara doğru kaydırma işlemi yapılır. */
+		/* en üstten başlamak daha az değişken kullanmamızı sağlardı ancak bu sefer önce boş olmayan satırı bulmamız gerekirdi (veya boş yere işlem gücü harcardık boş satırları kaydırarak) */
+		temp = gameBoard->matrix[gameBoard->n-1][j];
+		i = gameBoard->n-2;
+		while(i >= 0 && temp != '\0') /* temp != '\0' kontrolü ile gereksiz kaydırma işlemlerinden kaçınmış olduk */
 		{
-			gameBoard->matrix[i][coord.j] = '\0';
+			int old_val = gameBoard->matrix[i][j];
+			gameBoard->matrix[i][j] = temp;
+			temp = old_val;
 			i--;
 		}
-		explosionCount += down_length; /* patlama gerçekleşti */
+		/* sütundaki her satır bir üste kaydırıldı, şimdi rastgele yeni bir karakteri en alta yaz */
+		gameBoard->matrix[gameBoard->n-1][j] = gameCharacters[rand() % GAME_CHARACTERS_LENGTH];
+		/* en üst satırı kontrol et, eğer bir taş varsa ended = 1 */
+		if(gameBoard->matrix[0][j] != '\0')
+		{
+			ended = 1; /* yani kaybettin */
+		}
 	}
-	/* kaydırma işlemi bitti */
-	return explosionCount;
+	return ended;
+}
+
+/* İki taşın yerini değiştiren fonksiyon */
+void do_movement(GameBoard *gameBoard, MovementCoords movementCoords)
+{
+	char ch = '\0';
+	
+	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
+	
+	ch = gameBoard->matrix[movementCoords.c1.i][movementCoords.c1.j];
+	gameBoard->matrix[movementCoords.c1.i][movementCoords.c1.j] = gameBoard->matrix[movementCoords.c2.i][movementCoords.c2.j];
+	gameBoard->matrix[movementCoords.c2.i][movementCoords.c2.j] = ch;
+}
+
+/* Herhangi bir patlama veya yer değişikliği mümkün mü diye kontrol eder. (0 mümkün değil, 1 mümkün) */
+int do_check_possible_mov_and_exp(GameBoard *gameBoard)
+{
+	int i = 0, j = 0;
+	int possible = 0;
+	
+	assert(gameBoard != NULL);
+	
+	/* yer değişikliği mümkün mü onu kontrol et */
+	/* en alt satırdan başlamak daha mantıklı, üst satırlara gittikçe yer değişikliği yapabilme şansı azalabilir. */
+	for(i = gameBoard->n-1; (i >= 0) && (possible == 0); i--)
+	{
+		for(j = 0; (j < gameBoard->m-1) && (possible == 0); j++) /* en sağın bir soluna kadar git */
+		{
+			if(gameBoard->matrix[i][j] != '\0' && gameBoard->matrix[i][j+1] != '\0' &&
+				gameBoard->matrix[i][j] != gameBoard->matrix[i][j+1]) /* ben null değilim, sağımdaki null değil ve birbirimizden farklıyız. yani yer değiştirebiliriz */
+			{
+				possible = 1;
+			}
+		}
+	}
+	
+	/* herhangi bir yatay patlama olabilir mi diye kontrol et */
+	/* en alt satırda daha fazla taş olabileceği için en alt satırdan kontrole başla */
+	for(i = gameBoard->n-1; (i >= 0) && (possible == 0); i--)
+	{
+		for(j = 0; (j <= gameBoard->m-3) && (possible == 0); j++) /* en sağın 3 soluna kadar kontrol et */
+		{
+			if(gameBoard->matrix[i][j] != '\0' && gameBoard->matrix[i][j] == gameBoard->matrix[i][j+1] && gameBoard->matrix[i][j] == gameBoard->matrix[i][j+2]) /* boş değil, bir sağındaki ve 2 sağındaki karakter ile aynı */
+			{
+				possible = 1;
+			}
+		}
+	}
+	
+	/* herhangi bir dikey patlama olabilir mi diye kontrol et */
+	for(j = 0; (j < gameBoard->m) && (possible == 0); j++)
+	{
+		/* alt satırlarda daha fazla taş olabileceği için aşağıdan kontrol et */
+		for(i = gameBoard->n-1; (i >= 2) && (possible == 0); i--) /* en üstün 3 altına kadar kontrol et */
+		{
+			if(gameBoard->matrix[i][j] != '\0' && gameBoard->matrix[i][j] == gameBoard->matrix[i-1][j] && gameBoard->matrix[i][j] == gameBoard->matrix[i-2][j]) /* boş değil, bir sağındaki ve 2 sağındaki karakter ile aynı */
+			{
+				possible = 1;
+			}
+		}
+	}
+		
+	return possible;
 }
 
 int main()
@@ -640,26 +691,17 @@ int main()
 	
 	print_splash_screen();
 	
-	/* Kullanıcıdan matris boyutunun alınması ve kontrol edilmesi, geçersizse gerekli mesajların yazılması */
+	/* matrisin boyutunu al ve gameBoard'ın değişkenlerine ata */
 	matrixSize = get_matrix_size();
 	gameBoard.n = matrixSize.n;
 	gameBoard.m = matrixSize.m;
-	/* Kullanıcıdan matrisin boyunu alma işlemi bitti */
 	
-	
-	/* Kullanıcıdan oyun modunun alınması ve kontrol edilmesi, gerekirse hata mesajlarının yazılması */
 	gameStatus.gameMode = get_game_mode();
-	/* Kullanıcıdan oyun modunu alma bitti */
-	
-	
-	
 	
 	/* Modlara göre matrisi oluştur veya iste */
-	initialize_game_matrix(&gameBoard, gameStatus.gameMode);
-	/* Modlara göre matrisi oluşturma işlemi bitti. */
+	do_initialize_game_matrix(&gameBoard, gameStatus.gameMode);
 	
-	
-	/* Oynun asıl döngüsü */
+	/* Oyunun asıl döngüsü */
 	do
 	{
 		print_status(&gameBoard, gameStatus);
@@ -678,17 +720,55 @@ int main()
 			MovementCoords movementCoords = get_movement_coordinates(&gameBoard, gameStatus);
 			if(movementCoords.c1.i != -1 && movementCoords.c1.j != -1 && movementCoords.c2.i != -1 && movementCoords.c2.j != -1) /* işlem iptal edilmedi */
 			{
-				ended = do_movement(&gameBoard, gameStatus, movementCoords);
+				do_movement(&gameBoard, movementCoords);
+				
 				gameStatus.movementCount++;
+				
+				print_status(&gameBoard, gameStatus);
+				printf("Yer değiştirildi. Yeni satır ekleniyor\n");
+				pause();
+				
+				ended = do_append_new_random_row(&gameBoard);
+				
+				if(ended == 1) /* en üst satırda 0 olmayan eleman var */
+				{
+					print_status(&gameBoard, gameStatus);
+					printf("Oyun en üst satırda eleman bulunduğu için sonlandırılmıştır.\n");		
+				}
+				
 			}
 		}
-		/* patlatmak */
 		else /* operation == GAME_OPERATION_EXPLODE, ancak başka bir şey olamayacağı için direkt else dedik */
 		{
 			Coord coord = get_explosion_coordinate(&gameBoard, gameStatus);
-			if(coord.i != -1 && coord.j != -1)
+			if(coord.i != -1 && coord.j != -1) /* kullanıcı işlemi iptal etmediyse */
 			{
-				gameStatus.explosionCount += do_explosion(&gameBoard, coord);
+				ExplosionInfo explosionInfo = {EXPLOSION_DIRECTION_NOT_VALID, {0, 0}, 0}; /* ilk değeri bilmiyoruz */
+				explosionInfo.coord = coord;
+				do_explosion(&gameBoard, &explosionInfo);
+				if(explosionInfo.range > 0) /* patlama olmadıysa yer çekimi uygulamaya gerek yok */
+				{
+					gameStatus.explosionCount += explosionInfo.range;
+					print_status(&gameBoard, gameStatus);
+					printf("Patlama gerçekleşti. Yer çekimi uygulanıyor\n");
+					pause();
+					do_gravity(&gameBoard, &explosionInfo);
+					
+					/* sadece patlama gerçekleşti ise "oyun karambole gidebilir" */
+					if(do_check_possible_mov_and_exp(&gameBoard) == 0)
+					{
+						ended = 1;
+						print_status(&gameBoard, gameStatus);
+						printf("Oyun karambole gitti!\n");		
+					}
+					
+				}
+				else /* patlama olamadığını kullanıcıya bildir */
+				{
+					printf("Herhangi bir patlama olamadı!\n");
+					pause();
+				}
+				
 			}
 		}
 	}while(ended == 0);
