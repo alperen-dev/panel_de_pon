@@ -30,13 +30,12 @@ for ($i = 0; $i -lt $N; $i++) {
         $index = $random.Next(0, $karakterler.Count)
         $secilenKarakter = $karakterler[$index]
         $satirDizisi.Add($secilenKarakter)
-		Write-Output $secilenKarakter
     }
 
     # Satırı birleştir (görsel olarak ayrışması için araya boşluk konulmuştur)
     # Boşluksuz isterseniz -join "" yapabilirsiniz.
-    #$sonucSatiri = $satirDizisi -join " "
+    $sonucSatiri = $satirDizisi -join " "
     
     # Standart output'a yaz
-    #Write-Output $sonucSatiri
+    Write-Output $sonucSatiri
 }
