@@ -1,3 +1,5 @@
+#define NDEBUG
+
 #include <stdio.h> /* printf, puts, scanf, getchar */
 #include <stdlib.h> /* rand, srand, system, abs */
 #include <time.h> /* time */
@@ -101,7 +103,7 @@ void clear_screen(void)
 	/* terminali temizlemek için önişlemci komutları ile işletim sistemi tespit edilir */
 	/* eğer herhangi geçerli bir sistem tespit edilmezse 1000 kere \n basılır (işlevsel) */
 	#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(_WIN64) /* windows 32-bit veya 64-bit */
-		system("cls");
+		system("cls");	
 	#elif defined(__MSDOS__) || defined(__DOS__) || defined(MSDOS) || defined(_MSDOS) /* freedos veya dos-like (watcom) */
 		system("cls");
 	#elif defined(__APPLE__) || defined(__linux__) || defined(__unix__) /* unix like */
@@ -351,22 +353,22 @@ MovementCoords get_movement_coordinates(const GameBoard *gameBoard, GameStatus g
 		{
 			/* burada hataları else if.. diye değil de direkt if ile kontrol etmemizin sebebi */
 			/* eğer birden fazla yanlış koordinat varsa hepsini birden kullanıcıya haber etsin için */
-			if(movementCoords.c1.i < MIN_GAME_MATRIX_POSITION || movementCoords.c1.i > MAX_GAME_MATRIX_POSITION)
+			if(movementCoords.c1.i < MIN_GAME_MATRIX_POSITION || movementCoords.c1.i > gameBoard->n)
 			{
 				is_valid = 0;
 				printf("r1=%d değeri geçersiz aralıktadır!\n", movementCoords.c1.i);
 			}
-			if(movementCoords.c1.j < MIN_GAME_MATRIX_POSITION || movementCoords.c1.j > MAX_GAME_MATRIX_POSITION)
+			if(movementCoords.c1.j < MIN_GAME_MATRIX_POSITION || movementCoords.c1.j > gameBoard->m)
 			{
 				is_valid = 0;
 				printf("c1=%d değeri geçersiz aralıktadır!\n", movementCoords.c1.j);
 			}
-			if(movementCoords.c2.i < MIN_GAME_MATRIX_POSITION || movementCoords.c2.i > MAX_GAME_MATRIX_POSITION)
+			if(movementCoords.c2.i < MIN_GAME_MATRIX_POSITION || movementCoords.c2.i > gameBoard->n)
 			{
 				is_valid = 0;
 				printf("r2=%d değeri geçersiz aralıktadır!\n", movementCoords.c2.i);
 			}
-			if(movementCoords.c2.j < MIN_GAME_MATRIX_POSITION || movementCoords.c2.j > MAX_GAME_MATRIX_POSITION)
+			if(movementCoords.c2.j < MIN_GAME_MATRIX_POSITION || movementCoords.c2.j > gameBoard->m)
 			{
 				is_valid = 0;
 				printf("c2=%d değeri geçersiz aralıktadır!\n", movementCoords.c2.j);
@@ -430,12 +432,12 @@ Coord get_explosion_coordinate(const GameBoard *gameBoard, GameStatus gameStatus
 		}
 		else
 		{
-			if(coord.i < MIN_GAME_MATRIX_POSITION || coord.i > MAX_GAME_MATRIX_POSITION)
+			if(coord.i < MIN_GAME_MATRIX_POSITION || coord.i > gameBoard->n)
 			{
 				is_valid = 0;
 				printf("r=%d değeri geçersiz aralıktadır!\n", coord.i);
 			}
-			if(coord.j < MIN_GAME_MATRIX_POSITION || coord.j > MAX_GAME_MATRIX_POSITION)
+			if(coord.j < MIN_GAME_MATRIX_POSITION || coord.j > gameBoard->m)
 			{
 				is_valid = 0;
 				printf("c=%d değeri geçersiz aralıktadır!\n", coord.j);
@@ -535,7 +537,7 @@ void do_gravity(GameBoard *gameBoard, const ExplosionInfo *explosionInfo)
 	}
 	else if(explosionInfo->explosionDirection == EXPLOSION_DIRECTION_DOWN)
 	{
-		for(i = explosionInfo->coord.i-1; i >= 0 && gameBoard->matrix[i][j] != '\0'; i--) /* patlamanın olduğu satırın bir üstünden başla ve en tepedeki boşluğu görene kadar devam et, normal şartlarda bir sütunda sadece patlama olan yerler ve boşluk '\0' olur */
+		for(i = explosionInfo->coord.i-1; i >= 0 && gameBoard->matrix[i][explosionInfo->coord.j] != '\0'; i--) /* patlamanın olduğu satırın bir üstünden başla ve en tepedeki boşluğu görene kadar devam et, normal şartlarda bir sütunda sadece patlama olan yerler ve boşluk '\0' olur */
 		{
 			gameBoard->matrix[i+explosionInfo->range][explosionInfo->coord.j] = gameBoard->matrix[i][explosionInfo->coord.j]; /* üstteki değer patlama menzili kadar aşağı alındı */
 			gameBoard->matrix[i][explosionInfo->coord.j] = '\0'; /* eskiden yukarıda olup sonradan aşağı alınan satırdaki değer '\0' yapıldı */
@@ -551,6 +553,10 @@ void do_explosion(GameBoard *gameBoard, ExplosionInfo *explosionInfo)
 	
 	assert(gameBoard != NULL); /* yanlış parametre geçirilmesini önler (hata verir) */
 	assert(explosionInfo != NULL);
+	
+	/* ilk değerler patlama oladığını varsayar */
+	explosionInfo->explosionDirection = EXPLOSION_DIRECTION_NOT_VALID;
+	explosionInfo->range = 0;
 	
 	for(j = explosionInfo->coord.j+1; j < gameBoard->m && gameBoard->matrix[explosionInfo->coord.i][j-1] == gameBoard->matrix[explosionInfo->coord.i][j]; j++) /* sağa doğru */
 	{
@@ -605,14 +611,12 @@ int do_append_new_random_row(GameBoard *gameBoard)
 		/* matrisin en alt satırından üst satırlara doğru kaydırma işlemi yapılır. */
 		/* en üstten başlamak daha az değişken kullanmamızı sağlardı ancak bu sefer önce boş olmayan satırı bulmamız gerekirdi (veya boş yere işlem gücü harcardık, boş satırları kaydırarak) */
 		temp = gameBoard->matrix[gameBoard->n-1][j]; /* en alttaki elemanı al */
-		i = gameBoard->n-2;
-		while(i >= 0 && temp != '\0') /* temp != '\0' kontrolü ile gereksiz kaydırma işlemlerinden kaçınmış olduk */
+		for(i = gameBoard->n-2; i >= 0 && temp != '\0'; i--) /* temp != '\0' kontrolü ile gereksiz kaydırma işlemlerinden kaçınmış olduk */
 		{
 			/* eski değeri old_val ile tut, alttaki değer bu yere atanınca temp'i old_val yap */
 			int old_val = gameBoard->matrix[i][j];
 			gameBoard->matrix[i][j] = temp;
 			temp = old_val;
-			i--;
 		}
 		/* sütundaki her satır bir üste kaydırıldı, şimdi rastgele yeni bir karakteri en alta yaz */
 		gameBoard->matrix[gameBoard->n-1][j] = gameCharacters[rand() % GAME_CHARACTERS_LENGTH];
@@ -697,7 +701,7 @@ int main()
 	GameOperation gameOperation = GAME_OPERATION_UNKNOWN;
 	MatrixSize matrixSize = {0}; /* get_matrix_size fonksiyonunu geri dönüş değerini tutmak için kullanıldı */
 	
-	srand(time(NULL)); /* rastgele sayı üretmek için zamanı kullandık. basit bir oyun için yeterli bir "rastgelelik" sağlar */
+	srand(time(NULL)); /* rastgele sayı üretmek için zamanı kullandık. basit bir oyun için yeterli "rastgelelik" sağlar */
 	
 	clear_screen();
 	print_splash_screen();
@@ -747,7 +751,7 @@ int main()
 				
 			}
 		}
-		else /* operation == GAME_OPERATION_EXPLODE, ancak başka bir şey olamayacağı için direkt else dedik */
+		else if(gameOperation == GAME_OPERATION_EXPLODE) /* patlama yapmak istediğinde */
 		{
 			Coord coord = get_explosion_coordinate(&gameBoard, gameStatus);
 			if(coord.i != -1) /* kullanıcı işlemi iptal etmediyse */
@@ -755,7 +759,7 @@ int main()
 				ExplosionInfo explosionInfo = {EXPLOSION_DIRECTION_NOT_VALID, {0, 0}, 0}; /* ilk değeri bilmiyoruz */
 				explosionInfo.coord = coord;
 				do_explosion(&gameBoard, &explosionInfo);
-				if(explosionInfo.range > 0) /* patlama olmadıysa yer çekimi uygulamaya gerek yok */
+				if(explosionInfo.range > 0) /* patlama olmadıysa yer çekimi uygulamaya ve kilitlenme kontrolü yapmaya gerek yok */
 				{
 					gameStatus.explosionCount += explosionInfo.range;
 					
@@ -767,11 +771,11 @@ int main()
 					
 					ended = !do_check_possible_mov_and_exp(&gameBoard); /* hareket mümkün değilse biter */
 					
-					/* sadece patlama gerçekleşti ise "oyun karambole gidebilir" */
+					/* sadece patlama durumunda oyun kilitlenebilir */
 					if(ended == 1)
 					{
 						print_status(&gameBoard, gameStatus);
-						printf("Oyun karambole gitti!\n");		
+						printf("Oyun kilitlendi!\n");		
 					}
 					
 				}
